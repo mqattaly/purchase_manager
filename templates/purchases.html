@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}لیست همه خریدها{% endblock %}
+
+{% block content %}
+
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">📋 لیست همه خریدها</h1>
+      <div class="page-sub">سفارش‌های فعال کل سیستم، از همه تأمین‌کننده‌ها</div>
+    </div>
+  </div>
+
+  {% if products %}
+  <div class="card">
+    <table class="data">
+      <tr>
+        <th>تأمین‌کننده</th>
+        <th>نام محصول</th>
+        <th>تعداد</th>
+        <th>نوع تعداد</th>
+        <th>توضیحات</th>
+        <th>سفارش</th>
+      </tr>
+      {% for item in products %}
+      <tr>
+        <td>{{ item.supplier.name }}</td>
+        <td>{{ item.product_name }}</td>
+        <td class="mono">{{ item.quantity }}</td>
+        <td><span class="tag">{{ item.unit }}</span></td>
+        <td>{{ item.description }}</td>
+        <td>
+          <form method="POST" action="/toggle-order/{{ item.id }}">
+            <button type="submit" class="icon-btn" title="ثبت سفارش">
+              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="4"/></svg>
+            </button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% else %}
+  <div class="card empty-state">
+    <div class="empty-icon">📭</div>
+    هیچ سفارش فعالی تو کل سیستم ثبت نشده.
+  </div>
+  {% endif %}
+
+{% endblock %}

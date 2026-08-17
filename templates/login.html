@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="fa">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ورود · مدیریت خرید</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <style>
+    .login-shell {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(180deg, #142430, #1C3040);
+      padding: 20px;
+    }
+    .login-card {
+      width: 100%;
+      max-width: 340px;
+      background: var(--surface);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-pop);
+      padding: 30px 26px;
+    }
+    .login-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 22px;
+    }
+    .login-brand-mark {
+      width: 36px; height: 36px;
+      border-radius: 10px;
+      background: var(--accent);
+      display: flex; align-items: center; justify-content: center;
+      font-weight: 800; color: var(--accent-ink);
+    }
+    .login-brand-title { font-weight: 700; font-size: 15px; }
+    .login-field {
+      width: 100%;
+      height: 46px;
+      margin-bottom: 12px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 0 14px;
+      font-size: 14px;
+      font-family: var(--font-body);
+    }
+    .login-btn {
+      width: 100%;
+      height: 46px;
+      border: none;
+      border-radius: var(--radius-sm);
+      background: var(--sidebar-bg);
+      color: #fff;
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
+      margin-top: 6px;
+    }
+    .login-error {
+      background: var(--danger-bg);
+      color: var(--danger);
+      font-size: 12.5px;
+      padding: 10px 12px;
+      border-radius: var(--radius-sm);
+      margin-bottom: 14px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="login-shell">
+    <div class="login-card">
+      <div class="login-brand">
+        <div class="login-brand-mark">خ</div>
+        <div class="login-brand-title">مدیریت خرید</div>
+      </div>
+
+      {% if error %}
+        <div class="login-error">{{ error }}</div>
+      {% endif %}
+
+      <form method="POST" action="/login">
+        <input class="login-field" name="username" placeholder="نام کاربری" autocomplete="username" required autofocus>
+        <input class="login-field" name="password" type="password" placeholder="رمز عبور" autocomplete="current-password" required>
+        <button type="submit" class="login-btn">ورود</button>
+      </form>
+    </div>
+  </div>
+
+</body>
+</html>

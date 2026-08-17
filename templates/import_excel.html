@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}ایمپورت از اکسل{% endblock %}
+
+{% block content %}
+
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">📥 ایمپورت از اکسل</h1>
+      <div class="page-sub">چندین خرید را یک‌جا از فایل اکسل وارد کن</div>
+    </div>
+  </div>
+
+  {% if message %}
+    <div class="flash {{ 'flash-success' if success else 'flash-error' }}">
+      {{ '✓' if success else '!' }} {{ message }}
+    </div>
+  {% endif %}
+
+  {% if errors %}
+    <div class="card card-pad" style="margin-bottom:18px; border-color:#F0C9C4;">
+      <div style="font-size:13px; font-weight:600; color:var(--danger); margin-bottom:8px;">
+        این ردیف‌ها وارد نشدند:
+      </div>
+      <ul style="margin:0; padding-right:18px; font-size:12.5px; color:var(--ink-soft); line-height:1.9;">
+        {% for err in errors %}
+          <li>{{ err }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  {% endif %}
+
+  <div class="card card-pad" style="margin-bottom:20px;">
+    <div style="font-size:13px; font-weight:600; margin-bottom:10px;">۱. فایل نمونه را دانلود کن</div>
+    <div style="font-size:12.5px; color:var(--ink-soft); margin-bottom:14px;">
+      ستون‌ها را طبق همین فایل کامل کن: تأمین‌کننده، نام محصول، تعداد، نوع تعداد، توضیحات
+    </div>
+    <a href="/download-template" class="btn btn-ghost">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-4-4m4 4 4-4"/><path d="M4 19h16"/></svg>
+      دانلود فایل نمونه (Excel)
+    </a>
+  </div>
+
+  <div class="card card-pad">
+    <div style="font-size:13px; font-weight:600; margin-bottom:10px;">۲. فایل تکمیل‌شده را آپلود کن</div>
+    <form method="POST" action="/import" enctype="multipart/form-data" class="field-row">
+      <input type="file" name="file" accept=".xlsx,.xls,.csv" class="field" style="flex:1; max-width:340px; padding:8px 12px;" required>
+      <button type="submit" class="btn btn-accent">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21V9m0 0 4 4m-4-4-4 4"/><path d="M4 5h16"/></svg>
+        ایمپورت
+      </button>
+    </form>
+    <div style="font-size:11.5px; color:var(--ink-faint); margin-top:10px;">
+      فرمت‌های پشتیبانی‌شده: xlsx، xls، csv — برای گوگل‌شیت: «فایل ← دانلود ← Microsoft Excel» را بزن و همان فایل را اینجا آپلود کن.
+    </div>
+  </div>
+
+{% endblock %}

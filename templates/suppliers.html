@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}تأمین‌کننده‌ها{% endblock %}
+
+{% block content %}
+
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">🏭 تأمین‌کننده‌ها</h1>
+      <div class="page-sub">افزودن، ویرایش و مشاهده هر تأمین‌کننده</div>
+    </div>
+  </div>
+
+  <div id="message" class="flash" style="display:none;"></div>
+
+  <div class="card card-pad" style="margin-bottom:22px;">
+    <form id="add-supplier-form" class="field-row">
+      <input id="supplier-name" name="name" class="field" style="flex:1; max-width:320px" placeholder="نام تأمین‌کننده جدید" autocomplete="off" required>
+      <button id="add-supplier-btn" type="submit" class="btn btn-accent">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>
+        افزودن
+      </button>
+    </form>
+  </div>
+
+  <div class="card" id="supplier-list-card" style="{{ 'display:none;' if not suppliers }}">
+    <div id="supplier-list">
+      {% for supplier in suppliers %}
+        <div class="supplier-row" data-supplier-id="{{ supplier.id }}" style="{{ 'border-bottom:1px solid var(--border-soft);' if not loop.last }}">
+          <a href="/supplier/{{ supplier.id }}" class="supplier-name">{{ supplier.name }}</a>
+          <a href="/supplier/{{ supplier.id }}/edit" class="icon-btn" title="ویرایش">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+          </a>
+          <form method="POST" action="/supplier/{{ supplier.id }}/delete"
+                onsubmit="return confirm('آیا مطمئنید؟ همه سفارش‌های این تأمین‌کننده هم پاک می‌شود.');">
+            <button type="submit" class="icon-btn danger" title="حذف">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>
+            </button>
+          </form>
+        </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="card empty-state" id="supplier-empty" style="{{ 'display:none;' if suppliers }}">
+    <div class="empty-icon">🏭</div>
+    هنوز هیچ تأمین‌کننده‌ای اضافه نشده.
+  </div>
+
+  <script>
+    document.getElementById("add-supplier-form").addEventListener("submit", function (e) {
+      e.preventDefault();
+
+      const input = document.getElementById("supplier-name");
+      const name = input.value.trim();
+      if (!name) return;
+
+      const btn = document.getElementById("add-supplier-btn");
+      btn.disabled = true;
+
+      fetch("/suppliers", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "X-Requested-With": "fetch"
+        },
+        body: new URLSearchParams({ name: name })
+      })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          btn.disabled = false;
+
+          if (!data.success) {
+            showError(data.message);
+            return;
+          }
+
+          showSuccess("تأمین‌کننده اضافه شد");
+          addSupplierRow(data.id, data.name);
+
+          input.value = "";
+          input.focus();
+        })
+        .catch(function () {
+          btn.disabled = false;
+          showError("خطا در ارتباط با سرور");
+        });
+    });
+
+    function addSupplierRow(id, name) {
+      document.getElementById("supplier-empty").style.display = "none";
+      const card = document.getElementById("supplier-list-card");
+      card.style.display = "block";
+
+      const list = document.getElementById("supplier-list");
+
+      const existingRows = list.querySelectorAll(".supplier-row");
+      existingRows.forEach(function (row) {
+        row.style.borderBottom = "1px solid var(--border-soft)";
+      });
+
+      const row = document.createElement("div");
+      row.className = "supplier-row";
+      row.setAttribute("data-supplier-id", id);
+      row.innerHTML =
+        '<a href="/supplier/' + id + '" class="supplier-name">' + escapeHtml(name) + '</a>' +
+        '<a href="/supplier/' + id + '/edit" class="icon-btn" title="ویرایش">' +
+        '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>' +
+        '</a>' +
+        '<form method="POST" action="/supplier/' + id + '/delete" onsubmit="return confirm(\'آیا مطمئنید؟ همه سفارش‌های این تأمین‌کننده هم پاک می‌شود.\');">' +
+        '<button type="submit" class="icon-btn danger" title="حذف">' +
+        '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>' +
+        '</button></form>';
+
+      list.appendChild(row);
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement("div");
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    function showSuccess(text) {
+      const el = document.getElementById("message");
+      el.className = "flash flash-success";
+      el.textContent = "✓ " + text;
+      el.style.display = "inline-flex";
+    }
+
+    function showError(text) {
+      const el = document.getElementById("message");
+      el.className = "flash flash-error";
+      el.textContent = "! " + text;
+      el.style.display = "inline-flex";
+    }
+
+    window.addEventListener("load", function () {
+      document.getElementById("supplier-name").focus();
+    });
+  </script>
+
+{% endblock %}

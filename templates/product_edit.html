@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}ویرایش محصول{% endblock %}
+
+{% block content %}
+
+  <a href="/supplier/{{ product.supplier_id }}" class="breadcrumb">
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>
+    بازگشت
+  </a>
+
+  <div class="page-head">
+    <h1 class="page-title">ویرایش محصول</h1>
+  </div>
+
+  <div class="card card-pad">
+    <form method="POST" action="/product/{{ product.id }}/edit">
+      <div class="field-row">
+        <input name="product" class="field" style="width:220px" value="{{ product.product_name }}" required>
+        <input name="quantity" class="field mono" style="width:100px" type="number" value="{{ product.quantity }}" required>
+        <select name="unit" class="field" style="width:120px" required>
+          <option value="عدد" {{ 'selected' if product.unit == 'عدد' }}>عدد</option>
+          <option value="کارتن" {{ 'selected' if product.unit == 'کارتن' }}>کارتن</option>
+          <option value="بسته" {{ 'selected' if product.unit == 'بسته' }}>بسته</option>
+          <option value="گونی" {{ 'selected' if product.unit == 'گونی' }}>گونی</option>
+          <option value="کیلو" {{ 'selected' if product.unit == 'کیلو' }}>کیلو</option>
+        </select>
+        <input name="description" class="field" style="width:240px" value="{{ product.description or '' }}">
+        <button type="submit" class="btn btn-primary">ذخیره</button>
+      </div>
+    </form>
+  </div>
+
+{% endblock %}
