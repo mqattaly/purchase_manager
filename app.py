@@ -32,15 +32,18 @@ login_manager.login_view = "login"
 
 class Supplier(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(200), unique=True, nullable=False)
+    owner_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    name = db.Column(db.String(200), nullable=False)
     products = db.relationship("Product", backref="supplier", cascade="all, delete-orphan")
 
-    def __repr__(self):
-        return f"<Supplier {self.name}>"
+    __table_args__ = (db.UniqueConstraint("owner_id", "name", name="uq_supplier_owner_name"),)
+
+
 
 
 class Product(db.Model):
     id = db.Column(db.Integer, primary_key=True)
+    owner_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     supplier_id = db.Column(db.Integer, db.ForeignKey("supplier.id"), nullable=False)
     product_name = db.Column(db.String(300), nullable=False)
     quantity = db.Column(db.String(50))
