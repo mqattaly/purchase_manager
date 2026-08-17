@@ -194,7 +194,12 @@ def toggle_order(product_id):
     product.ordered = True
     product.ordered_date = date.today()
     db.session.commit()
+
+    if request.headers.get("X-Requested-With") == "fetch":
+        return {"success": True}
+
     return redirect(request.referrer or "/purchases")
+
     
 @app.route("/unarchive/<int:product_id>", methods=["POST"])
 def unarchive_product(product_id):
@@ -202,7 +207,11 @@ def unarchive_product(product_id):
     product.ordered = False
     product.ordered_date = None
     db.session.commit()
-    return redirect(request.referrer or f"/supplier/{product.supplier_id}")    
+
+    if request.headers.get("X-Requested-With") == "fetch":
+        return {"success": True}
+
+    return redirect(request.referrer or f"/supplier/{product.supplier_id}")
     
 @app.route("/product/<int:product_id>/edit", methods=["GET", "POST"])
 def edit_product(product_id):
@@ -279,8 +288,11 @@ def delete_archive_group(supplier_id, date_str):
     for p in products_to_delete:
         db.session.delete(p)
     db.session.commit()
-    return redirect(f"/supplier/{supplier_id}")
 
+    if request.headers.get("X-Requested-With") == "fetch":
+        return {"success": True}
+
+    return redirect(f"/supplier/{supplier_id}")
 @app.route("/suppliers", methods=["GET", "POST"])
 def suppliers():
     if request.method == "POST":
