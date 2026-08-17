@@ -320,6 +320,11 @@ label.field-label {
 
 /* ============ Tables ============ */
 
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
 table.data {
   width: 100%;
   border-collapse: collapse;
@@ -556,4 +561,5 @@ summary.archive-summary::-webkit-details-marker { display: none; }
   .nav a.active { border-bottom-color: var(--accent); }
   main.content { padding: 22px 18px 50px; }
   .tiles { grid-template-columns: 1fr; max-width: none; }
+  table.data { min-width: 640px; }
 }
