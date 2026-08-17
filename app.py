@@ -384,6 +384,41 @@ def download_template():
         download_name="نمونه_ایمپورت_خرید.xlsx"
     )
 
+@app.route("/api/search")
+def api_search():
+    query = request.args.get("q", "").strip()
+
+    if not query or len(query) < 2:
+        return {"results": []}
+
+    matches = (
+        Product.query
+        .join(Supplier)
+        .filter(Product.product_name.ilike(f"%{query}%"))
+        .order_by(Product.ordered.asc(), Product.id.desc())
+        .limit(50)
+        .all()
+    )
+
+    results = []
+    for m in matches:
+        date_label = None
+        if m.ordered_date:
+            date_label = jdatetime.date.fromgregorian(date=m.ordered_date).strftime("%Y/%m/%d")
+
+        results.append({
+            "id": m.id,
+            "supplier_id": m.supplier_id,
+            "supplier_name": m.supplier.name,
+            "product_name": m.product_name,
+            "quantity": m.quantity,
+            "unit": m.unit,
+            "description": m.description,
+            "ordered": m.ordered,
+            "ordered_date_label": date_label
+        })
+
+    return {"results": results}
 
 @app.route("/import", methods=["GET", "POST"])
 def import_excel():
@@ -498,7 +533,51 @@ def import_excel():
         success=True,
         errors=errors if errors else None
     )
-    
+
+@app.route("/users", methods=["GET", "POST"])
+def users():
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        wants_json = request.headers.get("X-Requested-With") == "fetch"
+
+        if not username or not password:
+            message = "نام کاربری و رمز عبور الزامی است."
+            if wants_json:
+                return {"success": False, "message": message}, 400
+            return redirect("/users")
+
+        if User.query.filter_by(username=username).first():
+            message = "این نام کاربری قبلاً وجود دارد."
+            if wants_json:
+                return {"success": False, "message": message}, 400
+            return redirect("/users")
+
+        new_user = User(username=username, password_hash=generate_password_hash(password))
+        db.session.add(new_user)
+        db.session.commit()
+
+        if wants_json:
+            return {"success": True, "id": new_user.id, "username": new_user.username}
+        return redirect("/users")
+
+    all_users = User.query.all()
+    return render_template("users.html", users=all_users)
+
+
+@app.route("/users/<int:user_id>/delete", methods=["POST"])
+def delete_user(user_id):
+    if user_id == current_user.id:
+        return {"success": False, "message": "نمی‌توانید حساب خودتان را حذف کنید."}, 400
+
+    if User.query.count() <= 1:
+        return {"success": False, "message": "حداقل یک کاربر باید باقی بماند."}, 400
+
+    user = User.query.get_or_404(user_id)
+    db.session.delete(user)
+    db.session.commit()
+    return {"success": True}
+
 if __name__ == "__main__":
     with app.app_context():
         db.create_all()
