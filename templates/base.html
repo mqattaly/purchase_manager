@@ -12,10 +12,10 @@
 
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-mark"></div>
+        <div class="brand-mark">خ</div>
         <div class="brand-text">
           <span class="brand-title">مدیریت خرید</span>
-          <span class="brand-sub">Mqattaly</span>
+          <span class="brand-sub">purchase.db</span>
         </div>
       </div>
 
@@ -41,21 +41,29 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V9l7-4 7 4v12"/><path d="M10 21v-6h4v6M17 21V11l4-2v12"/></svg>
           تأمین‌کننده‌ها
         </a>
-		
-		<a href="/import" class="{{ 'active' if request.path == '/import' }}">
-		  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-4-4m4 4 4-4"/><path d="M4 19h16"/></svg>
+
+        <a href="/import" class="{{ 'active' if request.path == '/import' }}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-4-4m4 4 4-4"/><path d="M4 19h16"/></svg>
           ایمپورت اکسل
         </a>
-		
-		
-		<a href="/logout" style="margin-top:auto; display:flex; align-items:center; gap:10px; padding:10px 12px; color:var(--sidebar-ink); text-decoration:none; font-size:13px;">
-  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
-  خروج
-</a>
-		
+
+        <a href="/search" class="{{ 'active' if request.path == '/search' }}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+          جستجوی محصول
+        </a>
+
+        <a href="/users" class="{{ 'active' if request.path == '/users' }}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.5-6 8-6s8 2 8 6"/></svg>
+          کاربران
+        </a>
       </nav>
 
-      <div class="sidebar-footer">طراحی و توسعه س.م.قتالی</div>
+      <a href="/logout" style="margin-top:auto; display:flex; align-items:center; gap:10px; padding:10px 12px; color:var(--sidebar-ink); text-decoration:none; font-size:13px;">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+        خروج
+      </a>
+
+      <div class="sidebar-footer">نسخه محلی · SQLite</div>
     </aside>
 
     <main class="content">
@@ -65,3 +73,4 @@
   </div>
 
 </body>
+</html>
