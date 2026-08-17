@@ -335,6 +335,15 @@ table.data th {
   letter-spacing: .2px;
 }
 
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.table-scroll table.data {
+  min-width: 620px;
+}
+
 table.data td {
   padding: 13px 14px;
   font-size: 13.5px;
