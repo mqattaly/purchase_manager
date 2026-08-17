@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}جستجوی محصول{% endblock %}
+
+{% block content %}
+
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">🔍 جستجوی محصول</h1>
+      <div class="page-sub">بین همه تأمین‌کننده‌ها، فعال و آرشیوشده</div>
+    </div>
+  </div>
+
+  <div class="card card-pad" style="margin-bottom:20px;">
+    <input id="search-input" class="field" style="width:100%; max-width:420px;" placeholder="نام محصول را تایپ کن..." autocomplete="off" autofocus>
+  </div>
+
+  <div id="search-status" style="font-size:12.5px; color:var(--ink-faint); margin-bottom:10px;"></div>
+
+  <div id="results-card" class="card table-scroll" style="display:none;">
+    <table class="data">
+      <tr>
+        <th>تأمین‌کننده</th>
+        <th>نام محصول</th>
+        <th>تعداد</th>
+        <th>نوع تعداد</th>
+        <th>وضعیت</th>
+        <th></th>
+      </tr>
+      <tbody id="results-body"></tbody>
+    </table>
+  </div>
+
+  <script>
+    let debounceTimer = null;
+    const input = document.getElementById("search-input");
+
+    input.addEventListener("input", function () {
+      clearTimeout(debounceTimer);
+      const q = input.value.trim();
+
+      if (q.length < 2) {
+        document.getElementById("results-card").style.display = "none";
+        document.getElementById("search-status").textContent = q.length === 1 ? "حداقل ۲ حرف تایپ کن..." : "";
+        return;
+      }
+
+      document.getElementById("search-status").textContent = "در حال جستجو...";
+
+      debounceTimer = setTimeout(function () {
+        fetch("/api/search?q=" + encodeURIComponent(q))
+          .then(function (res) { return res.json(); })
+          .then(function (data) { renderResults(data.results, q); });
+      }, 300);
+    });
+
+    function renderResults(results, q) {
+      const body = document.getElementById("results-body");
+      const card = document.getElementById("results-card");
+      const status = document.getElementById("search-status");
+
+      if (results.length === 0) {
+        card.style.display = "none";
+        status.textContent = "چیزی برای «" + q + "» پیدا نشد.";
+        return;
+      }
+
+      status.textContent = results.length + " نتیجه پیدا شد";
+      card.style.display = "block";
+
+      body.innerHTML = results.map(function (r) {
+        const statusTag = r.ordered
+          ? '<span class="tag tag-success">آرشیو · ' + (r.ordered_date_label || "") + '</span>'
+          : '<span class="tag tag-accent">فعال</span>';
+
+        return (
+          "<tr>" +
+          "<td>" + escapeHtml(r.supplier_name) + "</td>" +
+          "<td>" + escapeHtml(r.product_name) + "</td>" +
+          '<td class="mono">' + escapeHtml(r.quantity) + "</td>" +
+          "<td><span class='tag'>" + escapeHtml(r.unit) + "</span></td>" +
+          "<td>" + statusTag + "</td>" +
+          '<td><a href="/supplier/' + r.supplier_id + '" class="icon-btn" title="مشاهده تأمین‌کننده">' +
+          '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>' +
+          "</a></td>" +
+          "</tr>"
+        );
+      }).join("");
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement("div");
+      div.textContent = text == null ? "" : text;
+      return div.innerHTML;
+    }
+  </script>
+
+{% endblock %}
