@@ -14,8 +14,7 @@
 
   <h3 style="font-size:13.5px; color:var(--ink-soft); font-weight:600; margin:0 0 10px;">سفارش‌های فعال</h3>
 
-  {% if products %}
-  <div class="card" style="margin-bottom:32px;">
+  <div id="active-card" class="card table-scroll" style="margin-bottom:32px; {{ 'display:none;' if not products }}">
     <table class="data">
       <tr>
         <th>نام محصول</th>
@@ -26,101 +25,171 @@
         <th></th>
         <th></th>
       </tr>
-      {% for item in products %}
-      <tr>
-        <td>{{ item.product_name }}</td>
-        <td class="mono">{{ item.quantity }}</td>
-        <td><span class="tag">{{ item.unit }}</span></td>
-        <td>{{ item.description }}</td>
-        <td>
-          <form method="POST" action="/toggle-order/{{ item.id }}">
-            <button type="submit" class="icon-btn" title="ثبت سفارش">
+      <tbody id="active-body">
+        {% for item in products %}
+        <tr data-id="{{ item.id }}">
+          <td>{{ item.product_name }}</td>
+          <td class="mono">{{ item.quantity }}</td>
+          <td><span class="tag">{{ item.unit }}</span></td>
+          <td>{{ item.description }}</td>
+          <td>
+            <button type="button" class="icon-btn" title="ثبت سفارش" onclick="toggleOrder({{ item.id }})">
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="4"/></svg>
             </button>
-          </form>
-        </td>
-        <td>
-          <a href="/product/{{ item.id }}/edit" class="icon-btn" title="ویرایش">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
-          </a>
-        </td>
-        <td>
-          <form method="POST" action="/product/{{ item.id }}/delete" onsubmit="return confirm('این محصول حذف شود؟');">
-            <button type="submit" class="icon-btn danger" title="حذف">
+          </td>
+          <td>
+            <a href="/product/{{ item.id }}/edit" class="icon-btn" title="ویرایش">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+            </a>
+          </td>
+          <td>
+            <button type="button" class="icon-btn danger" title="حذف" onclick="deleteProduct({{ item.id }})">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>
             </button>
-          </form>
-        </td>
-      </tr>
-      {% endfor %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
     </table>
   </div>
-  {% else %}
-  <div class="card empty-state" style="margin-bottom:32px;">
+
+  <div id="active-empty" class="card empty-state" style="margin-bottom:32px; {{ 'display:none;' if products }}">
     <div class="empty-icon">📭</div>
     هیچ سفارش فعالی برای این تأمین‌کننده نیست.
   </div>
-  {% endif %}
 
   <h3 style="font-size:13.5px; color:var(--ink-soft); font-weight:600; margin:0 0 10px;">📦 آرشیو بر اساس تاریخ</h3>
 
-  {% if groups %}
-    {% for date_key, group in groups.items() %}
-    <details class="archive-group">
-      <summary class="archive-summary">
-        <span class="archive-date">
-          <span class="mono">{{ group.label }}</span>
-          <span class="archive-count">{{ group.products|length }} مورد</span>
-        </span>
-        <form method="POST" action="/supplier/{{ supplier.id }}/archive/{{ date_key }}/delete"
-              onsubmit="return confirm('همه محصولات این تاریخ حذف شوند؟');">
-          <button type="submit" class="delete-group-btn" onclick="event.stopPropagation();">
+  <div id="archive-wrap">
+    {% if groups %}
+      {% for date_key, group in groups.items() %}
+      <details class="archive-group" data-date-key="{{ date_key }}">
+        <summary class="archive-summary">
+          <span class="archive-date">
+            <span class="mono">{{ group.label }}</span>
+            <span class="archive-count">(<span class="count-num">{{ group.products|length }}</span> مورد)</span>
+          </span>
+          <button type="button" class="delete-group-btn" onclick="event.stopPropagation(); deleteGroup('{{ date_key }}')">
             <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>
             حذف همه
           </button>
-        </form>
-      </summary>
-      <div class="archive-body">
-        <table class="data">
-          <tr>
-            <th>نام محصول</th>
-            <th>تعداد</th>
-            <th>نوع تعداد</th>
-            <th>توضیحات</th>
-            <th></th>
-            <th></th>
-          </tr>
-          {% for item in group.products %}
-          <tr>
-            <td>{{ item.product_name }}</td>
-            <td class="mono">{{ item.quantity }}</td>
-            <td><span class="tag tag-success">{{ item.unit }}</span></td>
-            <td>{{ item.description }}</td>
-            <td>
-              <form method="POST" action="/unarchive/{{ item.id }}">
-                <button type="submit" class="icon-btn" title="بازگشت به لیست فعال">
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-1"/></svg>
-                </button>
-              </form>
-            </td>
-            <td>
-              <form method="POST" action="/product/{{ item.id }}/delete" onsubmit="return confirm('این محصول حذف شود؟');">
-                <button type="submit" class="icon-btn danger" title="حذف">
-                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>
-                </button>
-              </form>
-            </td>
-          </tr>
-          {% endfor %}
-        </table>
+        </summary>
+        <div class="archive-body table-scroll">
+          <table class="data">
+            <tr>
+              <th>نام محصول</th>
+              <th>تعداد</th>
+              <th>نوع تعداد</th>
+              <th>توضیحات</th>
+              <th></th>
+              <th></th>
+            </tr>
+            <tbody>
+              {% for item in group.products %}
+              <tr data-id="{{ item.id }}">
+                <td>{{ item.product_name }}</td>
+                <td class="mono">{{ item.quantity }}</td>
+                <td><span class="tag tag-success">{{ item.unit }}</span></td>
+                <td>{{ item.description }}</td>
+                <td>
+                  <button type="button" class="icon-btn" title="بازگشت به لیست فعال" onclick="unarchiveProduct({{ item.id }})">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-1"/></svg>
+                  </button>
+                </td>
+                <td>
+                  <button type="button" class="icon-btn danger" title="حذف" onclick="deleteProduct({{ item.id }})">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>
+                  </button>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </details>
+      {% endfor %}
+    {% else %}
+      <div class="card empty-state" id="archive-empty">
+        <div class="empty-icon">📦</div>
+        هنوز چیزی آرشیو نشده.
       </div>
-    </details>
-    {% endfor %}
-  {% else %}
-  <div class="card empty-state">
-    <div class="empty-icon">📦</div>
-    هنوز چیزی آرشیو نشده.
+    {% endif %}
   </div>
-  {% endif %}
+
+  <script>
+    function removeRow(id, { checkActiveEmpty = false } = {}) {
+      const row = document.querySelector('tr[data-id="' + id + '"]');
+      if (!row) return;
+      const parentGroup = row.closest("details.archive-group");
+      row.remove();
+
+      if (checkActiveEmpty) {
+        const remaining = document.querySelectorAll("#active-body tr").length;
+        if (remaining === 0) {
+          document.getElementById("active-card").style.display = "none";
+          document.getElementById("active-empty").style.display = "block";
+        }
+      }
+
+      if (parentGroup) {
+        const remainingInGroup = parentGroup.querySelectorAll("tbody tr").length;
+        if (remainingInGroup === 0) {
+          parentGroup.remove();
+          checkArchiveEmpty();
+        } else {
+          parentGroup.querySelector(".count-num").textContent = remainingInGroup;
+        }
+      }
+    }
+
+    function checkArchiveEmpty() {
+      const wrap = document.getElementById("archive-wrap");
+      if (wrap.querySelectorAll("details.archive-group").length === 0 && !document.getElementById("archive-empty")) {
+        wrap.innerHTML =
+          '<div class="card empty-state" id="archive-empty"><div class="empty-icon">📦</div>هنوز چیزی آرشیو نشده.</div>';
+      }
+    }
+
+    function toggleOrder(id) {
+      fetch("/toggle-order/" + id, { method: "POST", headers: { "X-Requested-With": "fetch" } })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (data.success) removeRow(id, { checkActiveEmpty: true });
+        });
+    }
+
+    function unarchiveProduct(id) {
+      fetch("/unarchive/" + id, { method: "POST", headers: { "X-Requested-With": "fetch" } })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (data.success) window.location.reload();
+          // چون آیتم باید به لیست فعال منتقل شود (نه فقط حذف)، ساده‌ترین راه بازخوانی است
+        });
+    }
+
+    function deleteProduct(id) {
+      if (!confirm("این محصول حذف شود؟")) return;
+      fetch("/product/" + id + "/delete", { method: "POST", headers: { "X-Requested-With": "fetch" } })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (data.success) removeRow(id, { checkActiveEmpty: true });
+        });
+    }
+
+    function deleteGroup(dateKey) {
+      if (!confirm("همه محصولات این تاریخ حذف شوند؟")) return;
+      fetch("/supplier/{{ supplier.id }}/archive/" + dateKey + "/delete", {
+        method: "POST",
+        headers: { "X-Requested-With": "fetch" }
+      })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (!data.success) return;
+          const group = document.querySelector('details.archive-group[data-date-key="' + dateKey + '"]');
+          if (group) group.remove();
+          checkArchiveEmpty();
+        });
+    }
+  </script>
 
 {% endblock %}
