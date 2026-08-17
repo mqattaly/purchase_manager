@@ -10,40 +10,61 @@
     </div>
   </div>
 
-  {% if products %}
-  <div class="card">
-    <table class="data">
-      <tr>
-        <th>تأمین‌کننده</th>
-        <th>نام محصول</th>
-        <th>تعداد</th>
-        <th>نوع تعداد</th>
-        <th>توضیحات</th>
-        <th>سفارش</th>
-      </tr>
-      {% for item in products %}
-      <tr>
-        <td>{{ item.supplier.name }}</td>
-        <td>{{ item.product_name }}</td>
-        <td class="mono">{{ item.quantity }}</td>
-        <td><span class="tag">{{ item.unit }}</span></td>
-        <td>{{ item.description }}</td>
-        <td>
-          <form method="POST" action="/toggle-order/{{ item.id }}">
-            <button type="submit" class="icon-btn" title="ثبت سفارش">
-              <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="4"/></svg>
-            </button>
-          </form>
-        </td>
-      </tr>
-      {% endfor %}
-    </table>
+  <div id="purchases-card" class="card" style="{{ 'display:none;' if not products }}">
+    <div class="table-scroll">
+      <table class="data">
+        <tr>
+          <th>تأمین‌کننده</th>
+          <th>نام محصول</th>
+          <th>تعداد</th>
+          <th>نوع تعداد</th>
+          <th>توضیحات</th>
+          <th>سفارش</th>
+        </tr>
+        <tbody id="purchases-body">
+          {% for item in products %}
+          <tr data-id="{{ item.id }}">
+            <td>{{ item.supplier.name }}</td>
+            <td>{{ item.product_name }}</td>
+            <td class="mono">{{ item.quantity }}</td>
+            <td><span class="tag">{{ item.unit }}</span></td>
+            <td>{{ item.description }}</td>
+            <td>
+              <button type="button" class="icon-btn" title="ثبت سفارش" onclick="toggleOrder({{ item.id }})">
+                <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="4"/></svg>
+              </button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </div>
-  {% else %}
-  <div class="card empty-state">
+
+  <div id="purchases-empty" class="card empty-state" style="{{ 'display:none;' if products }}">
     <div class="empty-icon">📭</div>
     هیچ سفارش فعالی تو کل سیستم ثبت نشده.
   </div>
-  {% endif %}
+
+  <script>
+    function toggleOrder(id) {
+      fetch("/toggle-order/" + id, {
+        method: "POST",
+        headers: { "X-Requested-With": "fetch" }
+      })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (!data.success) return;
+          const row = document.querySelector('tr[data-id="' + id + '"]');
+          row.remove();
+
+          const remaining = document.querySelectorAll("#purchases-body tr").length;
+          if (remaining === 0) {
+            document.getElementById("purchases-card").style.display = "none";
+            document.getElementById("purchases-empty").style.display = "block";
+          }
+        });
+    }
+  </script>
 
 {% endblock %}
