@@ -14,7 +14,7 @@ from flask_login import (
     current_user,
 )
 from werkzeug.security import generate_password_hash, check_password_hash
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect, or_, text
 from sqlalchemy.orm import joinedload
 from sqlalchemy.pool import NullPool
 import jdatetime
@@ -326,10 +326,20 @@ def home():
     recent = (
         user_products(ordered=False).order_by(Product.id.desc()).limit(5).all()
     )
+    supplier_active_counts = dict(
+        db.session.query(Product.supplier_id, db.func.count(Product.id))
+        .filter(
+            Product.owner_id == current_user.id,
+            Product.ordered.is_(False),
+        )
+        .group_by(Product.supplier_id)
+        .all()
+    )
 
     return render_template(
         "dashboard.html",
         suppliers=suppliers,
+        supplier_active_counts=supplier_active_counts,
         product_names=recent_product_names(),
         active_count=active_count,
         archived_count=archived_count,
@@ -714,17 +724,57 @@ def api_search():
     query = request.args.get("q", "").strip()
 
     if not query or len(query) < 2:
-        return {"results": []}
+        return {"results": [], "suppliers": []}
 
+    pattern = f"%{query}%"
     matches = (
         user_products()
-        .filter(Product.product_name.ilike(f"%{query}%"))
+        .join(Supplier, Product.supplier_id == Supplier.id)
+        .filter(
+            or_(
+                Product.product_name.ilike(pattern),
+                Supplier.name.ilike(pattern),
+            )
+        )
         .order_by(Product.ordered.asc(), Product.id.desc())
         .limit(50)
         .all()
     )
 
-    return {"results": [product_payload(item) for item in matches]}
+    matching_suppliers = (
+        Supplier.query.filter(
+            Supplier.owner_id == current_user.id,
+            Supplier.name.ilike(pattern),
+        )
+        .order_by(Supplier.name)
+        .limit(8)
+        .all()
+    )
+    supplier_ids = [supplier.id for supplier in matching_suppliers]
+    active_counts = {}
+    if supplier_ids:
+        active_counts = dict(
+            db.session.query(Product.supplier_id, db.func.count(Product.id))
+            .filter(
+                Product.owner_id == current_user.id,
+                Product.ordered.is_(False),
+                Product.supplier_id.in_(supplier_ids),
+            )
+            .group_by(Product.supplier_id)
+            .all()
+        )
+
+    return {
+        "results": [product_payload(item) for item in matches],
+        "suppliers": [
+            {
+                "id": supplier.id,
+                "name": supplier.name,
+                "active_count": active_counts.get(supplier.id, 0),
+            }
+            for supplier in matching_suppliers
+        ],
+    }
 
 
 @app.route("/import", methods=["GET", "POST"])

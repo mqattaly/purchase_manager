@@ -37,12 +37,20 @@
     </div>
 
     <div class="qa-field qa-unit">
-      <label class="field-label" for="qa-unit">واحد</label>
-      <select id="qa-unit" class="field">
+      <span class="field-label" id="qa-unit-label">واحد</span>
+      <div id="qa-unit-chips" class="unit-chip-group" role="radiogroup" aria-labelledby="qa-unit-label">
         {% for unit in unit_types %}
-          <option value="{{ unit }}">{{ unit }}</option>
+          <button
+            type="button"
+            class="unit-chip {{ 'selected' if loop.first }}"
+            data-value="{{ unit }}"
+            role="radio"
+            aria-checked="{{ 'true' if loop.first else 'false' }}"
+            tabindex="{{ '0' if loop.first else '-1' }}"
+          >{{ unit }}</button>
         {% endfor %}
-      </select>
+      </div>
+      <input id="qa-unit" type="hidden" value="{{ unit_types[0] if unit_types else '' }}">
     </div>
 
     <div class="qa-field qa-description">
