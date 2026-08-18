@@ -154,6 +154,33 @@
     }
 
 
+    /**
+     * ردیف را سر جای خودش در لیست فعال می‌گذارد.
+     * لیست فعال بر اساس شناسه‌ی نزولی مرتب است، پس ردیف قبل از اولین
+     * ردیفی می‌نشیند که شناسه‌اش کوچک‌تر است — دقیقاً همان‌جایی که بعد از
+     * رفرش صفحه هم دیده می‌شود.
+     */
+    function insertActiveRow(row) {
+      const body = document.getElementById("active-body");
+      const id = Number(row.dataset.id);
+      let target = null;
+
+      body.querySelectorAll("tr[data-id]").forEach(function (existing) {
+        if (target) return;
+        if (Number(existing.dataset.id) < id) target = existing;
+      });
+
+      body.insertBefore(row, target);   // target = null یعنی انتهای لیست
+    }
+
+    function flashRow(row) {
+      row.classList.add("row-highlight");
+      if (row.scrollIntoView) {
+        setTimeout(function () { row.scrollIntoView({ behavior: "smooth", block: "nearest" }); }, 30);
+      }
+      setTimeout(function () { row.classList.remove("row-highlight"); }, 4600);
+    }
+
     function syncActiveEmpty() {
       const remaining = document.querySelectorAll("#active-body tr").length;
       document.getElementById("active-card").style.display = remaining ? "" : "none";
@@ -311,8 +338,9 @@
       updateGroupCount(group);
 
       const activeRow = makeRow(item, "active");
-      document.getElementById("active-body").insertBefore(activeRow, document.getElementById("active-body").firstChild);
+      insertActiveRow(activeRow);
       syncActiveEmpty();
+      flashRow(activeRow);
 
       background("/unarchive/" + id, null, function (msg) {
         activeRow.remove();
