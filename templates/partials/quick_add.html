@@ -1,44 +1,118 @@
-{#  ثبت سریع — همین یک فایل هم در داشبورد و هم در صفحه «ثبت خرید» استفاده می‌شود  #}
-<section id="quick-add" class="quick-card" data-units='{{ unit_types|tojson }}'>
+{# ثبت سریع — همین فایل در داشبورد و صفحه «ثبت خرید» استفاده می‌شود #}
+
+<section
+  id="quick-add"
+  class="quick-card"
+  data-units='{{ unit_types|tojson }}'
+>
 
   <div class="quick-head">
     <div class="quick-title">
       <span class="quick-dot"></span>
       ثبت سریع
     </div>
+
     <div class="quick-hint">
-      <kbd>Enter</kbd> برو بعدی · روی «تعداد» <kbd>Enter</kbd> = ثبت · تعداد خالی = ۱
+      <kbd>Enter</kbd>
+      برو بعدی
+      ·
+      روی «توضیحات»
+      <kbd>Enter</kbd>
+      = ثبت
+      ·
+      تعداد خالی = ۱
     </div>
   </div>
 
-  <form id="qa-form" class="qa-form" autocomplete="off">
+  <form
+    id="qa-form"
+    class="qa-form"
+    autocomplete="off"
+  >
+
     <div class="qa-field qa-supplier">
-      <label class="field-label" for="qa-supplier">تأمین‌کننده</label>
-      <select id="qa-supplier" class="field" required>
-        <option value="">انتخاب…</option>
+      <label
+        class="field-label"
+        for="qa-supplier"
+      >
+      
+      </label>
+
+      <select
+        id="qa-supplier"
+        class="field"
+        required
+      >
+        <option value="">
+          انتخاب تامین کننده…
+        </option>
+
         {% for supplier in suppliers %}
-          <option value="{{ supplier.id }}">{{ supplier.name }}</option>
+          <option value="{{ supplier.id }}">
+            {{ supplier.name }}
+          </option>
         {% endfor %}
-        <option value="__new__">＋ تأمین‌کننده جدید…</option>
+
+        <option value="__new__">
+          ＋ تأمین‌کننده جدید…
+        </option>
       </select>
     </div>
 
     <div class="qa-field qa-product">
-      <label class="field-label" for="qa-product">نام محصول</label>
-      <input id="qa-product" class="field" list="qa-names" placeholder="مثلاً: روغن سرخ‌کردنی ۱.۸ لیتری">
+      <label
+        class="field-label"
+        for="qa-product"
+      >
+    
+      </label>
+
+      <input
+        id="qa-product"
+        class="field"
+        list="qa-names"
+        placeholder="مثلا: بشقاب شفاف 25 عددی"
+      >
+
       <datalist id="qa-names">
-        {% for name in product_names or [] %}<option value="{{ name }}"></option>{% endfor %}
+        {% for name in product_names or [] %}
+          <option value="{{ name }}"></option>
+        {% endfor %}
       </datalist>
     </div>
 
     <div class="qa-field qa-quantity">
-      <label class="field-label" for="qa-quantity">تعداد</label>
-      <input id="qa-quantity" class="field mono" type="number" inputmode="numeric" min="0" placeholder="۱">
+      <label
+        class="field-label"
+        for="qa-quantity"
+      >
+      
+      </label>
+
+      <input
+        id="qa-quantity"
+        class="field mono"
+        type="number"
+        inputmode="numeric"
+        min="0"
+        placeholder="تعداد"
+      >
     </div>
 
     <div class="qa-field qa-unit">
-      <span class="field-label" id="qa-unit-label">واحد</span>
-      <div id="qa-unit-chips" class="unit-chip-group" role="radiogroup" aria-labelledby="qa-unit-label">
+      <span
+        class="field-label"
+        id="qa-unit-label"
+      >
+      
+      </span>
+
+      <div
+        id="qa-unit-chips"
+        class="unit-chip-group"
+        role="radiogroup"
+        aria-labelledby="qa-unit-label"
+      >
         {% for unit in unit_types %}
           <button
             type="button"
@@ -47,42 +121,131 @@
             role="radio"
             aria-checked="{{ 'true' if loop.first else 'false' }}"
             tabindex="{{ '0' if loop.first else '-1' }}"
-          >{{ unit }}</button>
+          >
+            {{ unit }}
+          </button>
         {% endfor %}
       </div>
-      <input id="qa-unit" type="hidden" value="{{ unit_types[0] if unit_types else '' }}">
+
+      <input
+        id="qa-unit"
+        type="hidden"
+        value="{{ unit_types[0] if unit_types else '' }}"
+      >
     </div>
 
     <div class="qa-field qa-description">
-      <label class="field-label" for="qa-description">توضیحات (اختیاری)</label>
-      <input id="qa-description" class="field" placeholder="برند، مشتری، یادداشت…">
+      <label
+        class="field-label"
+        for="qa-description"
+      >
+      
+      </label>
+
+      <input
+        id="qa-description"
+        class="field"
+        placeholder="توضیحات اختیاری"
+      >
     </div>
 
     <div class="qa-field qa-submit">
-      <button type="submit" class="btn btn-accent btn-block">
-        <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+      <button
+        type="submit"
+        class="btn btn-accent btn-block"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          width="17"
+          height="17"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2.2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M12 5v14M5 12h14"/>
+        </svg>
+
         ثبت
       </button>
     </div>
+
   </form>
 
-  <div id="qa-new-supplier" class="qa-new-supplier" hidden>
-    <input id="qa-new-supplier-name" class="field" placeholder="نام تأمین‌کننده جدید">
-    <button type="button" id="qa-new-supplier-save" class="btn btn-primary">افزودن</button>
-    <button type="button" id="qa-new-supplier-cancel" class="btn btn-ghost">انصراف</button>
+  <div
+    id="qa-new-supplier"
+    class="qa-new-supplier"
+    hidden
+  >
+    <input
+      id="qa-new-supplier-name"
+      class="field"
+      placeholder="نام تأمین‌کننده جدید"
+    >
+
+    <button
+      type="button"
+      id="qa-new-supplier-save"
+      class="btn btn-primary"
+    >
+      افزودن
+    </button>
+
+    <button
+      type="button"
+      id="qa-new-supplier-cancel"
+      class="btn btn-ghost"
+    >
+      انصراف
+    </button>
   </div>
 
-  <div id="qa-session" class="qa-session" hidden>
+  <div
+    id="qa-session"
+    class="qa-session"
+    hidden
+  >
     <div class="qa-session-head">
+
       <h3 class="section-title">
         ثبت‌شده‌های همین حالا
-        <span class="counter-pill" id="qa-count">0</span>
-        <span class="sync-badge" id="qa-sync" hidden>
-          <span class="save-spinner"></span> در حال ذخیره…
+
+        <span
+          class="counter-pill"
+          id="qa-count"
+        >
+          0
+        </span>
+
+        <span
+          class="sync-badge"
+          id="qa-sync"
+          hidden
+        >
+          <span class="save-spinner"></span>
+          در حال ذخیره…
         </span>
       </h3>
-      <button type="button" id="qa-finish" class="btn btn-ghost btn-sm">
-        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+
+      <button
+        type="button"
+        id="qa-finish"
+        class="btn btn-ghost btn-sm"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          width="15"
+          height="15"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
+          <path d="M20 6 9 17l-5-5"/>
+        </svg>
+
         پایان و مشاهده لیست
       </button>
     </div>
@@ -99,6 +262,7 @@
             <th class="col-actions"></th>
           </tr>
         </thead>
+
         <tbody id="qa-body"></tbody>
       </table>
     </div>
