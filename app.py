@@ -372,6 +372,7 @@ def check_duplicate():
     return {
         "matches": [
             {
+                "id": m.id,
                 "supplier_name": m.supplier.name,
                 "quantity": m.quantity,
                 "unit": m.unit,

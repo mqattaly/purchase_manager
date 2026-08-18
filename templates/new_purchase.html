@@ -48,9 +48,10 @@
   </div>
 
   <div id="review-section" style="display:none; margin-top:26px;">
-    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px;">
+    <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; gap:12px; flex-wrap:wrap;">
       <h3 style="font-size:13.5px; color:var(--ink-soft); font-weight:600; margin:0;">
         ثبت‌شده‌های همین لحظه (<span id="review-count">0</span>)
+        <span id="sync-badge" class="sync-badge" style="display:none;">در حال ذخیره…</span>
       </h3>
       <button id="finish-btn" class="btn btn-ghost" type="button">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
@@ -58,9 +59,10 @@
       </button>
     </div>
 
-    <div class="card">
+    <div class="card table-scroll">
       <table class="data">
         <tr>
+          <th class="col-status"></th>
           <th>تأمین‌کننده</th>
           <th>محصول</th>
           <th>تعداد</th>
@@ -76,10 +78,19 @@
 
   <script>
     const fieldOrder = ["supplier", "product", "quantity", "unit", "description"];
+    const UNITS = ["عدد", "کارتن", "بسته", "گونی", "کیلو"];
     const supplierNames = {};
     {% for supplier in suppliers %}
-      supplierNames["{{ supplier.id }}"] = "{{ supplier.name }}";
+      supplierNames["{{ supplier.id }}"] = {{ supplier.name|tojson }};
     {% endfor %}
+
+    let rowCounter = 0;
+    let pendingCount = 0;
+    const saves = new Map();      // rowKey -> { promise, resolve, reject, payload }
+    const dupCache = new Map();   // "supplierId|product" -> matches[]
+    let dupTimer = null;
+
+    /* ---------------- keyboard flow ---------------- */
 
     fieldOrder.forEach(function (id, index) {
       const el = document.getElementById(id);
@@ -99,8 +110,62 @@
     });
 
     document.getElementById("finish-btn").addEventListener("click", function () {
-      window.location.href = "/purchases";
+      const btn = document.getElementById("finish-btn");
+      if (pendingCount === 0) { window.location.href = "/purchases"; return; }
+      // چیزی هنوز در حال ذخیره است: قبل از رفتن صبر می‌کنیم
+      btn.disabled = true;
+      allSettled().then(function () {
+        btn.disabled = false;
+        window.location.href = "/purchases";
+      });
     });
+
+    window.addEventListener("beforeunload", function (event) {
+      if (pendingCount === 0) return;
+      event.preventDefault();
+      event.returnValue = "";
+    });
+
+    /* ------------- duplicate check (prefetched in the background) ------------- */
+
+    function dupKey(supplierId, product) {
+      return String(supplierId) + "|" + product.trim().toLowerCase();
+    }
+
+    function fetchDuplicates(supplierId, product) {
+      const query = new URLSearchParams({ supplier: supplierId, product: product });
+      return fetch("/check-duplicate?" + query.toString(), { headers: { "X-Requested-With": "fetch" } })
+        .then(function (res) { return res.json(); })
+        .then(function (data) { return data.matches || []; })
+        .catch(function () { return []; });
+    }
+
+    function prefetchDuplicates() {
+      clearTimeout(dupTimer);
+      const supplierId = document.getElementById("supplier").value;
+      const product = document.getElementById("product").value.trim();
+      if (!supplierId || product.length < 2) return;
+      const key = dupKey(supplierId, product);
+      if (dupCache.has(key)) return;
+
+      dupTimer = setTimeout(function () {
+        fetchDuplicates(supplierId, product).then(function (matches) {
+          dupCache.set(key, matches);
+        });
+      }, 220);
+    }
+
+    document.getElementById("product").addEventListener("input", prefetchDuplicates);
+    document.getElementById("supplier").addEventListener("change", prefetchDuplicates);
+
+    function duplicateLines(matches) {
+      return matches.map(function (m) {
+        const where = m.same_supplier ? "همین تأمین‌کننده" : "«" + m.supplier_name + "»";
+        return "• برای " + where + " با تعداد " + m.quantity + " " + m.unit + " ثبت شده";
+      });
+    }
+
+    /* ---------------- instant submit ---------------- */
 
     function submitPurchase() {
       const supplier = document.getElementById("supplier").value;
@@ -114,190 +179,327 @@
       if (!quantity) { showError("تعداد را وارد کنید."); document.getElementById("quantity").focus(); return; }
       if (!unit) { showError("نوع تعداد را انتخاب کنید."); document.getElementById("unit").focus(); return; }
 
-      const btn = document.getElementById("submit-btn");
-      btn.disabled = true;
+      // اگر همین اسم را قبلاً چک کرده‌ایم، همان لحظه (بدون انتظار شبکه) هشدار می‌دهیم
+      const known = dupCache.get(dupKey(supplier, product));
+      if (known && known.length > 0) {
+        const confirmed = confirm(
+          "محصول «" + product + "» قبلاً ثبت شده:\n\n" +
+          duplicateLines(known).join("\n") +
+          "\n\nباز هم ثبت شود؟"
+        );
+        if (!confirmed) return;
+      }
 
-      const query = new URLSearchParams({ supplier, product });
-
-      fetch("/check-duplicate?" + query.toString(), {
-        headers: { "X-Requested-With": "fetch" }
-      })
-        .then(function (res) { return res.json(); })
-        .then(function (dupData) {
-          if (dupData.matches && dupData.matches.length > 0) {
-            const lines = dupData.matches.map(function (m) {
-              const where = m.same_supplier ? "همین تأمین‌کننده" : "«" + m.supplier_name + "»";
-              return "• برای " + where + " با تعداد " + m.quantity + " " + m.unit + " ثبت شده";
-            });
-
-            const confirmed = confirm(
-              "محصول «" + product + "» قبلاً ثبت شده:\n\n" +
-              lines.join("\n") +
-              "\n\nباز هم ثبت شود؟"
-            );
-
-            if (!confirmed) {
-              btn.disabled = false;
-              return;
-            }
-          }
-          actuallySubmit(supplier, product, quantity, unit, description, btn);
-        })
-        .catch(function () {
-          // اگر بررسی تکراری خطا داد، جلوی ثبت را نمی‌گیریم
-          actuallySubmit(supplier, product, quantity, unit, description, btn);
-        });
-    }
-
-    function actuallySubmit(supplier, product, quantity, unit, description, btn) {
-      fetch("/new-purchase", {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "fetch" },
-        body: new URLSearchParams({ supplier, product, quantity, unit, description })
-      })
-        .then(function (res) { return res.json(); })
-        .then(function (data) {
-          btn.disabled = false;
-          if (data.success) {
-            showSuccess(data.message);
-            addReviewRow(data.product);
-            document.getElementById("product").value = "";
-            document.getElementById("quantity").value = "";
-            document.getElementById("description").value = "";
-            document.getElementById("product").focus();
-          } else {
-            showError(data.message);
-          }
-        })
-        .catch(function () {
-          btn.disabled = false;
-          showError("خطا در ارتباط با سرور");
-        });
-    }
-
-    function addReviewRow(item) {
-      document.getElementById("review-section").style.display = "block";
-
-      const tbody = document.getElementById("review-body");
-      const row = document.createElement("tr");
-      row.setAttribute("data-id", item.id);
-      row.dataset.supplierId = item.supplier_id || "";
-      row.dataset.supplierName = item.supplier_name || "";
-      row.innerHTML = buildRowHtml(item);
-      tbody.appendChild(row);
-
-      updateCount();
-    }
-
-    function buildRowHtml(item) {
-      return (
-        '<td>' + escapeHtml(item.supplier_name) + '</td>' +
-        '<td class="cell-product">' + escapeHtml(item.product_name) + '</td>' +
-        '<td class="mono cell-quantity">' + escapeHtml(item.quantity) + '</td>' +
-        '<td class="cell-unit"><span class="tag">' + escapeHtml(item.unit) + '</span></td>' +
-        '<td class="cell-description">' + escapeHtml(item.description || "") + '</td>' +
-        '<td><button type="button" class="icon-btn" onclick="startEdit(' + item.id + ')" title="ویرایش">' +
-          '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>' +
-        '</button></td>' +
-        '<td><button type="button" class="icon-btn danger" onclick="deleteRow(' + item.id + ')" title="حذف">' +
-          '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>' +
-        '</button></td>'
-      );
-    }
-
-    function startEdit(id) {
-      const row = document.querySelector('tr[data-id="' + id + '"]');
-      const currentProduct = row.querySelector(".cell-product").textContent;
-      const currentQuantity = row.querySelector(".cell-quantity").textContent;
-      const currentUnit = row.querySelector(".cell-unit").textContent.trim();
-      const currentDescription = row.querySelector(".cell-description").textContent;
-
-      row.querySelector(".cell-product").innerHTML = '<input class="field" style="height:34px; width:150px;" value="' + escapeAttr(currentProduct) + '">';
-      row.querySelector(".cell-quantity").innerHTML = '<input class="field mono" style="height:34px; width:80px;" type="number" value="' + escapeAttr(currentQuantity) + '">';
-      row.querySelector(".cell-unit").innerHTML =
-        '<select class="field" style="height:34px; width:100px;">' +
-        ["عدد", "کارتن", "بسته", "گونی", "کیلو"].map(function (u) {
-          return '<option value="' + u + '"' + (u === currentUnit ? " selected" : "") + '>' + u + '</option>';
-        }).join("") +
-        '</select>';
-      row.querySelector(".cell-description").innerHTML = '<input class="field" style="height:34px; width:170px;" value="' + escapeAttr(currentDescription) + '">';
-
-      const lastCells = row.querySelectorAll("td");
-      lastCells[5].innerHTML = '<button type="button" class="icon-btn" onclick="saveEdit(' + id + ')" title="ذخیره">' +
-        '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></button>';
-      lastCells[6].innerHTML = '<button type="button" class="icon-btn" onclick="cancelEdit(' + id + ')" title="لغو">✕</button>';
-    }
-
-    function cancelEdit(id) {
-      // بازخوانی ساده: از سرور دوباره نمی‌خوانیم، فقط با مقادیر فعلی دیتاست بازمی‌سازیم
-      fetch("/product/" + id + "/info", { headers: { "X-Requested-With": "fetch" } })
-        .then(function (res) { return res.json(); })
-        .then(function (data) {
-          const row = document.querySelector('tr[data-id="' + id + '"]');
-          row.innerHTML = buildRowHtml(data.product);
-        });
-    }
-
-    function saveEdit(id) {
-      const row = document.querySelector('tr[data-id="' + id + '"]');
-      const product = row.querySelector(".cell-product input").value.trim();
-      const quantity = row.querySelector(".cell-quantity input").value.trim();
-      const unit = row.querySelector(".cell-unit select").value;
-      const description = row.querySelector(".cell-description input").value.trim();
-      const optimistic = {
-        id: id,
-        supplier_id: row.dataset.supplierId,
-        supplier_name: row.dataset.supplierName || "",
+      const payload = { supplier: supplier, product: product, quantity: quantity, unit: unit, description: description };
+      const item = {
+        key: "tmp-" + (++rowCounter),
+        supplier_id: supplier,
+        supplier_name: supplierNames[supplier] || "",
         product_name: product,
         quantity: quantity,
         unit: unit,
         description: description
       };
-      row.innerHTML = buildRowHtml(optimistic);
 
-      fetch("/product/" + id + "/edit", {
+      // ردیف بلافاصله اضافه می‌شود و فرم همان لحظه آماده ورودی بعدی است
+      addReviewRow(item);
+      clearMessage();
+      document.getElementById("product").value = "";
+      document.getElementById("quantity").value = "";
+      document.getElementById("description").value = "";
+      document.getElementById("product").focus();
+
+      saveRow(item.key, payload, !known);
+    }
+
+    function saveRow(key, payload, needsDupCheck) {
+      const row = rowByKey(key);
+      if (!row) return;
+      setRowState(row, "pending");
+
+      const entry = saves.get(key) || {};
+      if (!entry.promise) {
+        entry.promise = new Promise(function (resolve, reject) {
+          entry.resolve = resolve;
+          entry.reject = reject;
+        });
+        entry.promise.catch(function () {});  // جلوگیری از unhandled rejection
+      }
+      entry.payload = payload;
+      saves.set(key, entry);
+
+      pendingCount += 1;
+      syncBadge();
+
+      const dupPromise = needsDupCheck ? fetchDuplicates(payload.supplier, payload.product) : Promise.resolve([]);
+
+      fetch("/new-purchase", {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "fetch" },
-        body: new URLSearchParams({ product, quantity, unit, description })
+        body: new URLSearchParams(payload)
       })
-        .then(function (res) { return res.json(); })
-        .then(function (data) {
-          if (data.success) {
-            row.innerHTML = buildRowHtml(data.product);
-          } else {
-            showError(data.message);
-            cancelEdit(id);
+        .then(function (res) {
+          return res.json().then(function (data) { return { ok: res.ok && data.success !== false, data: data }; });
+        })
+        .then(function (result) {
+          pendingCount -= 1;
+          syncBadge();
+
+          if (!result.ok) {
+            failRow(key, (result.data && result.data.message) || "ثبت نشد");
+            return;
           }
+
+          const saved = result.data.product;
+          const liveRow = rowByKey(key);
+          if (liveRow) {
+            liveRow.dataset.realId = saved.id;
+            setRowState(liveRow, "saved");
+          }
+          dupCache.delete(dupKey(payload.supplier, payload.product));
+          if (entry.resolve) entry.resolve(String(saved.id));
+
+          // هشدار تکراری‌بودن بعد از ثبت، بدون معطل‌کردن کاربر
+          dupPromise.then(function (matches) {
+            const others = (matches || []).filter(function (m) { return String(m.id) !== String(saved.id); });
+            if (others.length) markDuplicate(key, payload.product, others);
+          });
         })
         .catch(function () {
-          showError("خطا در ارتباط با سرور");
-          cancelEdit(id);
+          pendingCount -= 1;
+          syncBadge();
+          failRow(key, "خطا در ارتباط با سرور");
         });
     }
 
-    function deleteRow(id) {
-      if (!confirm("این ردیف حذف شود؟")) return;
-      const row = document.querySelector('tr[data-id="' + id + '"]');
+    function failRow(key, message) {
+      const row = rowByKey(key);
+      if (row) setRowState(row, "failed");
+      showError(message + " — ردیف قرمز را دوباره بفرست یا حذفش کن");
+    }
+
+    function retryRow(key) {
+      const entry = saves.get(key);
+      if (!entry || !entry.payload) return;
+      clearMessage();
+      saveRow(key, entry.payload, false);
+    }
+
+    function whenSaved(key) {
+      const row = rowByKey(key);
+      if (row && row.dataset.realId) return Promise.resolve(row.dataset.realId);
+      const entry = saves.get(key);
+      if (entry && entry.promise) return entry.promise;
+      return Promise.reject(new Error("no-id"));
+    }
+
+    /* ---------------- review table ---------------- */
+
+    function rowByKey(key) {
+      return document.querySelector('#review-body tr[data-key="' + key + '"]');
+    }
+
+    function itemFromRow(row) {
+      return {
+        key: row.dataset.key,
+        supplier_id: row.dataset.supplierId || "",
+        supplier_name: row.dataset.supplierName || "",
+        product_name: row.dataset.productName || "",
+        quantity: row.dataset.quantity || "",
+        unit: row.dataset.unit || "",
+        description: row.dataset.description || ""
+      };
+    }
+
+    function setRowData(row, item) {
+      row.dataset.key = item.key;
+      row.dataset.supplierId = item.supplier_id || "";
+      row.dataset.supplierName = item.supplier_name || "";
+      row.dataset.productName = item.product_name || "";
+      row.dataset.quantity = item.quantity || "";
+      row.dataset.unit = item.unit || "";
+      row.dataset.description = item.description || "";
+    }
+
+    function addReviewRow(item) {
+      document.getElementById("review-section").style.display = "block";
+
+      const row = document.createElement("tr");
+      setRowData(row, item);
+      row.innerHTML = buildRowHtml(item, "pending");
+      document.getElementById("review-body").insertBefore(row, document.getElementById("review-body").firstChild);
+      updateCount();
+      return row;
+    }
+
+    function setRowState(row, state) {
+      row.classList.remove("row-pending", "row-saved", "row-failed");
+      row.classList.add("row-" + state);
+      row.dataset.state = state;
+      const cell = row.querySelector(".cell-status");
+      if (cell) cell.innerHTML = statusHtml(row.dataset.key, state);
+      if (state === "saved") {
+        row.classList.add("row-just-saved");
+        setTimeout(function () { row.classList.remove("row-just-saved"); }, 900);
+      }
+    }
+
+    function statusHtml(key, state) {
+      if (state === "pending") {
+        return '<span class="save-spinner" title="در حال ذخیره…"></span>';
+      }
+      if (state === "failed") {
+        return '<button type="button" class="icon-btn danger" title="ذخیره نشد — تلاش دوباره" onclick="retryRow(\'' + key + '\')">' +
+          '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg></button>';
+      }
+      return '<span class="save-ok" title="ذخیره شد">' +
+        '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></span>';
+    }
+
+    function buildRowHtml(item, state) {
+      const key = item.key;
+      return (
+        '<td class="cell-status">' + statusHtml(key, state || "saved") + '</td>' +
+        '<td class="cell-supplier">' + escapeHtml(item.supplier_name) + '</td>' +
+        '<td class="cell-product">' + escapeHtml(item.product_name) + '</td>' +
+        '<td class="mono cell-quantity">' + escapeHtml(item.quantity) + '</td>' +
+        '<td class="cell-unit"><span class="tag">' + escapeHtml(item.unit) + '</span></td>' +
+        '<td class="cell-description">' + escapeHtml(item.description || "") + '</td>' +
+        '<td><button type="button" class="icon-btn" onclick="startEdit(\'' + key + '\')" title="ویرایش">' +
+          '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>' +
+        '</button></td>' +
+        '<td><button type="button" class="icon-btn danger" onclick="deleteRow(\'' + key + '\')" title="حذف">' +
+          '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>' +
+        '</button></td>'
+      );
+    }
+
+    function repaintRow(row, item) {
+      const state = row.dataset.state || "saved";
+      row.innerHTML = buildRowHtml(item, state);
+    }
+
+    function markDuplicate(key, product, matches) {
+      const row = rowByKey(key);
       if (!row) return;
+      row.classList.add("row-duplicate");
+      const cell = row.querySelector(".cell-product");
+      if (cell && !cell.querySelector(".dup-badge")) {
+        const badge = document.createElement("span");
+        badge.className = "dup-badge";
+        badge.textContent = "تکراری";
+        badge.title = duplicateLines(matches).join("\n");
+        cell.appendChild(badge);
+      }
+      showWarning("«" + product + "» قبلاً هم ثبت شده بود — اگر اشتباه است همین ردیف را حذف کن");
+    }
+
+    /* ---------------- edit / delete (already instant) ---------------- */
+
+    function startEdit(key) {
+      const row = rowByKey(key);
+      if (!row || row.classList.contains("editing")) return;
+      row.classList.add("editing");
+      const item = itemFromRow(row);
+
+      row.querySelector(".cell-product").innerHTML = '<input class="field" style="height:34px; width:150px;" value="' + escapeAttr(item.product_name) + '">';
+      row.querySelector(".cell-quantity").innerHTML = '<input class="field mono" style="height:34px; width:80px;" type="number" value="' + escapeAttr(item.quantity) + '">';
+      row.querySelector(".cell-unit").innerHTML =
+        '<select class="field" style="height:34px; width:100px;">' +
+        UNITS.map(function (u) {
+          return '<option value="' + u + '"' + (u === item.unit ? " selected" : "") + '>' + u + '</option>';
+        }).join("") +
+        '</select>';
+      row.querySelector(".cell-description").innerHTML = '<input class="field" style="height:34px; width:170px;" value="' + escapeAttr(item.description) + '">';
+
+      const cells = row.querySelectorAll("td");
+      cells[6].innerHTML = '<button type="button" class="icon-btn" onclick="saveEdit(\'' + key + '\')" title="ذخیره">' +
+        '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></button>';
+      cells[7].innerHTML = '<button type="button" class="icon-btn" onclick="cancelEdit(\'' + key + '\')" title="لغو">✕</button>';
+    }
+
+    function cancelEdit(key) {
+      const row = rowByKey(key);
+      if (!row) return;
+      row.classList.remove("editing");
+      repaintRow(row, itemFromRow(row));
+    }
+
+    function saveEdit(key) {
+      const row = rowByKey(key);
+      if (!row) return;
+      const product = row.querySelector(".cell-product input").value.trim();
+      const quantity = row.querySelector(".cell-quantity input").value.trim();
+      const unit = row.querySelector(".cell-unit select").value;
+      const description = row.querySelector(".cell-description input").value.trim();
+      if (!product || !quantity || !unit) {
+        showError("اطلاعات محصول کامل نیست.");
+        return;
+      }
+
+      const prev = itemFromRow(row);
+      const next = Object.assign({}, prev, { product_name: product, quantity: quantity, unit: unit, description: description });
+      setRowData(row, next);
+      row.classList.remove("editing");
+      repaintRow(row, next);
+
+      const entry = saves.get(key);
+      if (entry && entry.payload) {
+        entry.payload = Object.assign({}, entry.payload, { product: product, quantity: quantity, unit: unit, description: description });
+      }
+
+      whenSaved(key).then(function (id) {
+        return fetch("/product/" + id + "/edit", {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "fetch" },
+          body: new URLSearchParams({ product: product, quantity: quantity, unit: unit, description: description })
+        }).then(function (res) {
+          return res.json().then(function (data) { return { ok: res.ok && data.success !== false, data: data }; });
+        });
+      })
+        .then(function (result) {
+          if (result.ok) return;
+          setRowData(row, prev);
+          repaintRow(row, prev);
+          showError((result.data && result.data.message) || "ذخیره نشد");
+        })
+        .catch(function () {
+          setRowData(row, prev);
+          repaintRow(row, prev);
+          showError("ویرایش ذخیره نشد");
+        });
+    }
+
+    function deleteRow(key) {
+      if (!confirm("این ردیف حذف شود؟")) return;
+      const row = rowByKey(key);
+      if (!row) return;
+      const wasFailed = row.dataset.state === "failed";
       const next = row.nextElementSibling;
       const parent = row.parentNode;
       const backup = row.outerHTML;
       row.remove();
       updateCount();
 
-      fetch("/product/" + id + "/delete", {
-        method: "POST",
-        headers: { "X-Requested-With": "fetch" }
+      // ردیفی که اصلاً ذخیره نشده، فقط از جدول برداشته می‌شود
+      if (wasFailed) { saves.delete(key); return; }
+
+      whenSaved(key).then(function (id) {
+        return fetch("/product/" + id + "/delete", {
+          method: "POST",
+          headers: { "X-Requested-With": "fetch" }
+        }).then(function (res) {
+          return res.json().then(function (data) { return { ok: res.ok && data.success !== false }; });
+        });
       })
-        .then(function (res) { return res.json().then(function (data) { return { ok: res.ok && data.success !== false }; }); })
         .then(function (result) {
-          if (result.ok) return;
+          if (result.ok) { saves.delete(key); return; }
           restoreReviewRow(parent, next, backup);
           showError("حذف انجام نشد");
         })
         .catch(function () {
           restoreReviewRow(parent, next, backup);
-          showError("خطا در ارتباط با سرور");
+          showError("حذف انجام نشد");
         });
     }
 
@@ -308,6 +510,21 @@
       if (next && next.parentNode === parent) parent.insertBefore(node, next);
       else parent.appendChild(node);
       updateCount();
+    }
+
+    /* ---------------- misc ---------------- */
+
+    function allSettled() {
+      const promises = [];
+      saves.forEach(function (entry) {
+        if (entry.promise) promises.push(entry.promise.catch(function () {}));
+      });
+      return Promise.all(promises);
+    }
+
+    function syncBadge() {
+      const badge = document.getElementById("sync-badge");
+      badge.style.display = pendingCount > 0 ? "inline-flex" : "none";
     }
 
     function updateCount() {
@@ -323,13 +540,20 @@
     }
 
     function escapeAttr(text) {
-      return String(text).replace(/"/g, "&quot;");
+      return String(text == null ? "" : text).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
     }
 
-    function showSuccess(text) {
+    function clearMessage() {
       const el = document.getElementById("message");
-      el.className = "flash flash-success";
-      el.textContent = "✓ " + text;
+      el.className = "flash";
+      el.textContent = "";
+      el.style.display = "none";
+    }
+
+    function showWarning(text) {
+      const el = document.getElementById("message");
+      el.className = "flash flash-warning";
+      el.textContent = "⚠ " + text;
       el.style.display = "inline-flex";
     }
 
