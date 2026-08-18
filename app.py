@@ -758,50 +758,78 @@ def import_excel():
     )
 
 
-@app.route("/users", methods=["GET", "POST"])
-def users():
-    if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "")
+@app.route("/account")
+def account():
+    """Personal account page — only ever shows the logged-in user's own data."""
+    supplier_count = Supplier.query.filter_by(owner_id=current_user.id).count()
+    active_count = Product.query.filter_by(owner_id=current_user.id, ordered=False).count()
+    archived_count = Product.query.filter_by(owner_id=current_user.id, ordered=True).count()
 
-        if not username or not password:
-            message = "نام کاربری و رمز عبور الزامی است."
-            if wants_json():
-                return {"success": False, "message": message}, 400
-            return redirect("/users")
-
-        if User.query.filter_by(username=username).first():
-            message = "این نام کاربری قبلاً وجود دارد."
-            if wants_json():
-                return {"success": False, "message": message}, 400
-            return redirect("/users")
-
-        new_user = User(username=username, password_hash=generate_password_hash(password))
-        db.session.add(new_user)
-        db.session.commit()
-
-        if wants_json():
-            return {"success": True, "id": new_user.id, "username": new_user.username}
-        return redirect("/users")
-
-    all_users = User.query.order_by(User.id).all()
-    return render_template("users.html", users=all_users)
+    return render_template(
+        "account.html",
+        supplier_count=supplier_count,
+        active_count=active_count,
+        archived_count=archived_count,
+    )
 
 
-@app.route("/users/<int:user_id>/delete", methods=["POST"])
-def delete_user(user_id):
-    if user_id == current_user.id:
-        return {"success": False, "message": "نمی‌توانید حساب خودتان را حذف کنید."}, 400
+@app.route("/account/username", methods=["POST"])
+def change_username():
+    new_username = request.form.get("username", "").strip()
+    password = request.form.get("current_password", "")
 
-    if User.query.count() <= 1:
-        return {"success": False, "message": "حداقل یک کاربر باید باقی بماند."}, 400
+    user = db.session.get(User, current_user.id)
 
-    user = User.query.get_or_404(user_id)
-    Product.query.filter_by(owner_id=user.id).delete(synchronize_session=False)
-    Supplier.query.filter_by(owner_id=user.id).delete(synchronize_session=False)
-    db.session.delete(user)
+    if not new_username:
+        return {"success": False, "message": "نام کاربری را وارد کنید."}, 400
+    if len(new_username) < 2:
+        return {"success": False, "message": "نام کاربری خیلی کوتاه است."}, 400
+    if not check_password_hash(user.password_hash, password):
+        return {"success": False, "message": "رمز عبور فعلی درست نیست."}, 400
+    if new_username == user.username:
+        return {"success": False, "message": "این همان نام کاربری فعلی است."}, 400
+    if User.query.filter(User.username == new_username, User.id != user.id).first():
+        return {"success": False, "message": "این نام کاربری قبلاً وجود دارد."}, 400
+
+    user.username = new_username
     db.session.commit()
-    return {"success": True}
+    return {"success": True, "username": user.username}
+
+
+@app.route("/account/password", methods=["POST"])
+def change_password():
+    current_password = request.form.get("current_password", "")
+    new_password = request.form.get("new_password", "")
+    confirm_password = request.form.get("confirm_password", "")
+
+    user = db.session.get(User, current_user.id)
+
+    if not check_password_hash(user.password_hash, current_password):
+        return {"success": False, "message": "رمز عبور فعلی درست نیست."}, 400
+    if len(new_password) < 4:
+        return {"success": False, "message": "رمز عبور جدید حداقل ۴ کاراکتر باشد."}, 400
+    if new_password != confirm_password:
+        return {"success": False, "message": "تکرار رمز عبور جدید یکسان نیست."}, 400
+    if check_password_hash(user.password_hash, new_password):
+        return {"success": False, "message": "رمز جدید با رمز فعلی فرقی ندارد."}, 400
+
+    user.password_hash = generate_password_hash(new_password)
+    db.session.commit()
+    login_user(user)  # refresh the session after the credentials change
+    return {"success": True, "message": "رمز عبور عوض شد."}
+
+
+@app.route("/users")
+def users_redirect():
+    """Old users list is gone — nobody may see or manage other accounts."""
+    return redirect(url_for("account"))
+
+
+@app.route("/users/<int:user_id>/delete", methods=["GET", "POST"])
+@app.route("/users/<int:user_id>", methods=["GET", "POST", "DELETE"])
+def users_gone(user_id):
+    """Legacy account-management endpoints are closed off to prevent abuse."""
+    return {"success": False, "message": "این مسیر غیرفعال است."}, 403
 
 
 if __name__ == "__main__":
