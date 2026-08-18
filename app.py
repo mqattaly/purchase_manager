@@ -35,6 +35,8 @@ else:
     app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(INSTANCE_DIR, "purchase.db")
 
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+# Static files are versioned with ?v=<hash>, so they can be cached hard.
+app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 60 * 60 * 24 * 365
 
 if os.environ.get("VERCEL"):
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"poolclass": NullPool}
@@ -108,11 +110,13 @@ def load_user(user_id):
     return db.session.get(User, int(user_id))
 
 
-def product_payload(product):
+def product_payload(product, supplier_name=None):
+    if supplier_name is None:
+        supplier_name = product.supplier.name if product.supplier else ""
     return {
         "id": product.id,
         "supplier_id": product.supplier_id,
-        "supplier_name": product.supplier.name if product.supplier else "",
+        "supplier_name": supplier_name,
         "product_name": product.product_name,
         "quantity": product.quantity,
         "unit": product.unit,
@@ -121,6 +125,64 @@ def product_payload(product):
         "ordered_date": product.ordered_date.isoformat() if product.ordered_date else None,
         "ordered_date_label": shamsi_label(product.ordered_date),
     }
+
+
+def json_error(message, status=400):
+    return {"success": False, "message": message}, status
+
+
+def user_suppliers():
+    """All suppliers of the logged-in user, alphabetically."""
+    return Supplier.query.filter_by(owner_id=current_user.id).order_by(Supplier.name).all()
+
+
+def user_products(**filters):
+    """Base product query scoped to the logged-in user (supplier eagerly loaded)."""
+    return (
+        Product.query.options(joinedload(Product.supplier))
+        .filter_by(owner_id=current_user.id, **filters)
+    )
+
+
+def recent_product_names(limit=150):
+    """Names already used by this user — feeds the browser's autocomplete."""
+    rows = (
+        db.session.query(Product.product_name)
+        .filter(Product.owner_id == current_user.id)
+        .order_by(Product.id.desc())
+        .limit(600)
+        .all()
+    )
+    seen = []
+    known = set()
+    for (name,) in rows:
+        key = (name or "").strip().lower()
+        if not key or key in known:
+            continue
+        known.add(key)
+        seen.append(name)
+        if len(seen) >= limit:
+            break
+    return seen
+
+
+def read_product_form():
+    """Validate the shared product form. Returns (fields, error)."""
+    fields = {
+        "supplier_id": request.form.get("supplier", ""),
+        "product_name": request.form.get("product", "").strip(),
+        "quantity": request.form.get("quantity", "").strip(),
+        "unit": request.form.get("unit", ""),
+        "description": request.form.get("description", "").strip(),
+    }
+
+    if not fields["product_name"]:
+        return fields, "نام محصول را وارد کنید."
+    if not fields["quantity"]:
+        return fields, "تعداد را وارد کنید."
+    if fields["unit"] not in UNIT_TYPES:
+        return fields, "نوع تعداد را انتخاب کنید."
+    return fields, None
 
 
 def owned_supplier_or_404(supplier_id):
@@ -177,11 +239,18 @@ def ensure_schema():
             )
         except Exception:
             pass
-        try:
-            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_supplier_owner ON supplier (owner_id)"))
-            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_product_owner ON product (owner_id)"))
-        except Exception:
-            pass
+        for statement in (
+            "CREATE INDEX IF NOT EXISTS ix_supplier_owner ON supplier (owner_id)",
+            "CREATE INDEX IF NOT EXISTS ix_product_owner ON product (owner_id)",
+            # the two lists the app opens most: active rows, and one supplier's rows
+            "CREATE INDEX IF NOT EXISTS ix_product_owner_ordered ON product (owner_id, ordered)",
+            "CREATE INDEX IF NOT EXISTS ix_product_supplier_ordered "
+            "ON product (supplier_id, ordered, ordered_date)",
+        ):
+            try:
+                conn.execute(text(statement))
+            except Exception:
+                pass
 
     first = db.session.execute(text('SELECT id FROM "user" ORDER BY id LIMIT 1')).scalar()
     if first:
@@ -194,6 +263,25 @@ def ensure_schema():
             {"uid": first},
         )
         db.session.commit()
+
+
+def _asset_version():
+    """Cache-busting stamp so browsers can cache CSS/JS for a year."""
+    stamp = 0
+    for name in ("style.css", "app.js"):
+        try:
+            stamp = max(stamp, int(os.path.getmtime(os.path.join(BASE_DIR, "static", name))))
+        except OSError:
+            pass
+    return str(stamp)
+
+
+ASSET_VERSION = _asset_version()
+
+
+@app.context_processor
+def inject_template_globals():
+    return {"asset_v": ASSET_VERSION, "unit_types": UNIT_TYPES}
 
 
 _schema_ready = False
@@ -219,10 +307,34 @@ def _prepare_request():
 
 @app.route("/")
 def home():
-    all_suppliers = (
-        Supplier.query.filter_by(owner_id=current_user.id).order_by(Supplier.name).all()
+    """Opening the app lands straight on the capture screen."""
+    suppliers = user_suppliers()
+
+    # one grouped query instead of two counts (SQLite gives 0/1, Postgres True/False)
+    active_count = archived_count = 0
+    for ordered_flag, total in (
+        db.session.query(Product.ordered, db.func.count(Product.id))
+        .filter(Product.owner_id == current_user.id)
+        .group_by(Product.ordered)
+        .all()
+    ):
+        if ordered_flag:
+            archived_count += total
+        else:
+            active_count += total
+
+    recent = (
+        user_products(ordered=False).order_by(Product.id.desc()).limit(5).all()
     )
-    return render_template("dashboard.html", suppliers=all_suppliers)
+
+    return render_template(
+        "dashboard.html",
+        suppliers=suppliers,
+        product_names=recent_product_names(),
+        active_count=active_count,
+        archived_count=archived_count,
+        recent=recent,
+    )
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -291,48 +403,36 @@ def search():
 
 @app.route("/new-purchase", methods=["GET", "POST"])
 def new_purchase():
-    suppliers = (
-        Supplier.query.filter_by(owner_id=current_user.id).order_by(Supplier.name).all()
-    )
-
     if request.method == "POST":
-        supplier_id = request.form.get("supplier")
-        product_name = request.form.get("product", "").strip()
-        quantity = request.form.get("quantity", "").strip()
-        unit = request.form.get("unit")
-        description = request.form.get("description", "").strip()
+        fields, error = read_product_form()
 
-        error = None
         supplier = None
-        if not supplier_id:
+        if not fields["supplier_id"]:
             error = "تأمین‌کننده را انتخاب کنید."
         else:
             supplier = Supplier.query.filter_by(
-                id=supplier_id, owner_id=current_user.id
+                id=fields["supplier_id"], owner_id=current_user.id
             ).first()
             if not supplier:
                 error = "تأمین‌کننده معتبر نیست."
-        if not error and not product_name:
-            error = "نام محصول را وارد کنید."
-        elif not error and not quantity:
-            error = "تعداد را وارد کنید."
-        elif not error and unit not in UNIT_TYPES:
-            error = "نوع تعداد را انتخاب کنید."
 
         if error:
             if wants_json():
-                return {"success": False, "message": error}, 400
+                return json_error(error)
             return render_template(
-                "new_purchase.html", suppliers=suppliers, message=error, success=False
+                "new_purchase.html",
+                suppliers=user_suppliers(),
+                message=error,
+                success=False,
             )
 
         new_product = Product(
             owner_id=current_user.id,
             supplier_id=supplier.id,
-            product_name=product_name,
-            quantity=quantity,
-            unit=unit,
-            description=description,
+            product_name=fields["product_name"],
+            quantity=fields["quantity"],
+            unit=fields["unit"],
+            description=fields["description"],
         )
         db.session.add(new_product)
         db.session.commit()
@@ -340,18 +440,18 @@ def new_purchase():
         if wants_json():
             return {
                 "success": True,
-                "message": "خرید با موفقیت ثبت شد",
-                "product": product_payload(new_product),
+                "message": "خرید ثبت شد",
+                "product": product_payload(new_product, supplier.name),
             }
 
-        return render_template(
-            "new_purchase.html",
-            suppliers=suppliers,
-            message="✓ خرید با موفقیت ثبت شد",
-            success=True,
-        )
+        return redirect("/new-purchase")
 
-    return render_template("new_purchase.html", suppliers=suppliers, message=None)
+    return render_template(
+        "new_purchase.html",
+        suppliers=user_suppliers(),
+        product_names=recent_product_names(),
+        message=None,
+    )
 
 
 @app.route("/check-duplicate")
@@ -363,8 +463,7 @@ def check_duplicate():
         return {"matches": []}
 
     matches = (
-        Product.query.options(joinedload(Product.supplier))
-        .filter_by(owner_id=current_user.id, ordered=False)
+        user_products(ordered=False)
         .filter(db.func.lower(Product.product_name) == product_name.lower())
         .all()
     )
@@ -372,6 +471,7 @@ def check_duplicate():
     return {
         "matches": [
             {
+                "id": m.id,
                 "supplier_name": m.supplier.name,
                 "quantity": m.quantity,
                 "unit": m.unit,
@@ -384,12 +484,7 @@ def check_duplicate():
 
 @app.route("/purchases")
 def purchases():
-    all_products = (
-        Product.query.options(joinedload(Product.supplier))
-        .filter_by(owner_id=current_user.id, ordered=False)
-        .order_by(Product.id.desc())
-        .all()
-    )
+    all_products = user_products(ordered=False).order_by(Product.id.desc()).all()
     return render_template("purchases.html", products=all_products)
 
 
@@ -429,7 +524,7 @@ def edit_product(product_id):
 
         if not name or not quantity or unit not in UNIT_TYPES:
             if wants_json():
-                return {"success": False, "message": "اطلاعات محصول کامل نیست."}, 400
+                return json_error("اطلاعات محصول کامل نیست.")
             return render_template("product_edit.html", product=product)
 
         product.product_name = name
@@ -499,13 +594,13 @@ def suppliers():
 
         if not name:
             if wants_json():
-                return {"success": False, "message": "نام تأمین‌کننده را وارد کنید."}, 400
+                return json_error("نام تأمین‌کننده را وارد کنید.")
             return redirect("/suppliers")
 
         existing = Supplier.query.filter_by(owner_id=current_user.id, name=name).first()
         if existing:
             if wants_json():
-                return {"success": False, "message": "این تأمین‌کننده قبلاً ثبت شده است."}, 400
+                return json_error("این تأمین‌کننده قبلاً ثبت شده است.")
             return redirect("/suppliers")
 
         new_supplier = Supplier(name=name, owner_id=current_user.id)
@@ -516,10 +611,7 @@ def suppliers():
             return {"success": True, "id": new_supplier.id, "name": new_supplier.name}
         return redirect("/suppliers")
 
-    all_suppliers = (
-        Supplier.query.filter_by(owner_id=current_user.id).order_by(Supplier.name).all()
-    )
-    return render_template("suppliers.html", suppliers=all_suppliers)
+    return render_template("suppliers.html", suppliers=user_suppliers())
 
 
 @app.route("/supplier/<int:supplier_id>")
@@ -537,7 +629,7 @@ def supplier_detail(supplier_id):
         Product.query.filter_by(
             owner_id=current_user.id, supplier_id=supplier_id, ordered=True
         )
-        .order_by(Product.ordered_date.desc(), Product.id.desc())
+        .order_by(Product.ordered_date.desc().nullslast(), Product.id.desc())
         .all()
     )
 
@@ -574,7 +666,7 @@ def edit_supplier(supplier_id):
         new_name = request.form.get("name", "").strip()
         if not new_name:
             if wants_json():
-                return {"success": False, "message": "نام تأمین‌کننده را وارد کنید."}, 400
+                return json_error("نام تأمین‌کننده را وارد کنید.")
             return render_template("supplier_edit.html", supplier=supplier)
 
         clash = (
@@ -584,7 +676,7 @@ def edit_supplier(supplier_id):
         )
         if clash:
             if wants_json():
-                return {"success": False, "message": "این نام قبلاً ثبت شده است."}, 400
+                return json_error("این نام قبلاً ثبت شده است.")
             return render_template("supplier_edit.html", supplier=supplier)
 
         supplier.name = new_name
@@ -625,8 +717,7 @@ def api_search():
         return {"results": []}
 
     matches = (
-        Product.query.options(joinedload(Product.supplier))
-        .filter_by(owner_id=current_user.id)
+        user_products()
         .filter(Product.product_name.ilike(f"%{query}%"))
         .order_by(Product.ordered.asc(), Product.id.desc())
         .limit(50)
@@ -671,7 +762,7 @@ def import_excel():
 
     df = df.dropna(how="all")
 
-    existing_suppliers = Supplier.query.filter_by(owner_id=current_user.id).all()
+    existing_suppliers = user_suppliers()
     normalized_map = {normalize_name(s.name): s for s in existing_suppliers}
     normalized_names = list(normalized_map.keys())
 
@@ -758,50 +849,78 @@ def import_excel():
     )
 
 
-@app.route("/users", methods=["GET", "POST"])
-def users():
-    if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "")
+@app.route("/account")
+def account():
+    """Personal account page — only ever shows the logged-in user's own data."""
+    supplier_count = Supplier.query.filter_by(owner_id=current_user.id).count()
+    active_count = Product.query.filter_by(owner_id=current_user.id, ordered=False).count()
+    archived_count = Product.query.filter_by(owner_id=current_user.id, ordered=True).count()
 
-        if not username or not password:
-            message = "نام کاربری و رمز عبور الزامی است."
-            if wants_json():
-                return {"success": False, "message": message}, 400
-            return redirect("/users")
-
-        if User.query.filter_by(username=username).first():
-            message = "این نام کاربری قبلاً وجود دارد."
-            if wants_json():
-                return {"success": False, "message": message}, 400
-            return redirect("/users")
-
-        new_user = User(username=username, password_hash=generate_password_hash(password))
-        db.session.add(new_user)
-        db.session.commit()
-
-        if wants_json():
-            return {"success": True, "id": new_user.id, "username": new_user.username}
-        return redirect("/users")
-
-    all_users = User.query.order_by(User.id).all()
-    return render_template("users.html", users=all_users)
+    return render_template(
+        "account.html",
+        supplier_count=supplier_count,
+        active_count=active_count,
+        archived_count=archived_count,
+    )
 
 
-@app.route("/users/<int:user_id>/delete", methods=["POST"])
-def delete_user(user_id):
-    if user_id == current_user.id:
-        return {"success": False, "message": "نمی‌توانید حساب خودتان را حذف کنید."}, 400
+@app.route("/account/username", methods=["POST"])
+def change_username():
+    new_username = request.form.get("username", "").strip()
+    password = request.form.get("current_password", "")
 
-    if User.query.count() <= 1:
-        return {"success": False, "message": "حداقل یک کاربر باید باقی بماند."}, 400
+    user = db.session.get(User, current_user.id)
 
-    user = User.query.get_or_404(user_id)
-    Product.query.filter_by(owner_id=user.id).delete(synchronize_session=False)
-    Supplier.query.filter_by(owner_id=user.id).delete(synchronize_session=False)
-    db.session.delete(user)
+    if not new_username:
+        return json_error("نام کاربری را وارد کنید.")
+    if len(new_username) < 2:
+        return json_error("نام کاربری خیلی کوتاه است.")
+    if not check_password_hash(user.password_hash, password):
+        return json_error("رمز عبور فعلی درست نیست.")
+    if new_username == user.username:
+        return json_error("این همان نام کاربری فعلی است.")
+    if User.query.filter(User.username == new_username, User.id != user.id).first():
+        return json_error("این نام کاربری قبلاً وجود دارد.")
+
+    user.username = new_username
     db.session.commit()
-    return {"success": True}
+    return {"success": True, "username": user.username}
+
+
+@app.route("/account/password", methods=["POST"])
+def change_password():
+    current_password = request.form.get("current_password", "")
+    new_password = request.form.get("new_password", "")
+    confirm_password = request.form.get("confirm_password", "")
+
+    user = db.session.get(User, current_user.id)
+
+    if not check_password_hash(user.password_hash, current_password):
+        return json_error("رمز عبور فعلی درست نیست.")
+    if len(new_password) < 4:
+        return json_error("رمز عبور جدید حداقل ۴ کاراکتر باشد.")
+    if new_password != confirm_password:
+        return json_error("تکرار رمز عبور جدید یکسان نیست.")
+    if check_password_hash(user.password_hash, new_password):
+        return json_error("رمز جدید با رمز فعلی فرقی ندارد.")
+
+    user.password_hash = generate_password_hash(new_password)
+    db.session.commit()
+    login_user(user)  # refresh the session after the credentials change
+    return {"success": True, "message": "رمز عبور عوض شد."}
+
+
+@app.route("/users")
+def users_redirect():
+    """Old users list is gone — nobody may see or manage other accounts."""
+    return redirect(url_for("account"))
+
+
+@app.route("/users/<int:user_id>/delete", methods=["GET", "POST"])
+@app.route("/users/<int:user_id>", methods=["GET", "POST", "DELETE"])
+def users_gone(user_id):
+    """Legacy account-management endpoints are closed off to prevent abuse."""
+    return json_error("این مسیر غیرفعال است.", 403)
 
 
 if __name__ == "__main__":

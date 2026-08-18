@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block title %}حساب من{% endblock %}
+
+{% block content %}
+
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">👤 حساب من</h1>
+      <div class="page-sub">اطلاعات حساب خودت — هیچ‌کس حساب دیگری را نمی‌بیند و نمی‌تواند حذف کند</div>
+    </div>
+  </div>
+
+
+  <div class="card card-pad" style="margin-bottom:22px;">
+    <div class="account-head">
+      <div class="account-avatar">{{ current_user.username[:1]|upper }}</div>
+      <div>
+        <div class="account-name" id="account-username">{{ current_user.username }}</div>
+        <div class="page-sub" style="margin-top:2px;">حساب فعال</div>
+      </div>
+    </div>
+
+    <div class="account-stats">
+      <div class="account-stat">
+        <span class="account-stat-num mono">{{ supplier_count }}</span>
+        <span class="account-stat-label">تأمین‌کننده</span>
+      </div>
+      <div class="account-stat">
+        <span class="account-stat-num mono">{{ active_count }}</span>
+        <span class="account-stat-label">سفارش فعال</span>
+      </div>
+      <div class="account-stat">
+        <span class="account-stat-num mono">{{ archived_count }}</span>
+        <span class="account-stat-label">آرشیو شده</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card card-pad" style="margin-bottom:22px;">
+    <h3 class="account-section-title">تغییر نام کاربری</h3>
+    <form id="username-form" class="field-row">
+      <input id="new-username" class="field" style="width:190px" placeholder="نام کاربری جدید" value="{{ current_user.username }}" autocomplete="off" required>
+      <input id="username-password" class="field" style="width:190px" type="password" placeholder="رمز عبور فعلی" autocomplete="current-password" required>
+      <button id="username-btn" type="submit" class="btn btn-accent">ذخیره نام کاربری</button>
+    </form>
+  </div>
+
+  <div class="card card-pad" style="margin-bottom:22px;">
+    <h3 class="account-section-title">تغییر رمز عبور</h3>
+    <form id="password-form" class="field-row">
+      <input id="current-password" class="field" style="width:170px" type="password" placeholder="رمز عبور فعلی" autocomplete="current-password" required>
+      <input id="new-password" class="field" style="width:170px" type="password" placeholder="رمز جدید" autocomplete="new-password" required>
+      <input id="confirm-password" class="field" style="width:170px" type="password" placeholder="تکرار رمز جدید" autocomplete="new-password" required>
+      <button id="password-btn" type="submit" class="btn btn-accent">ذخیره رمز عبور</button>
+    </form>
+  </div>
+
+  <div class="card card-pad">
+    <h3 class="account-section-title">خروج از حساب</h3>
+    <div class="page-sub" style="margin-bottom:14px;">با خروج، برای دیدن اطلاعاتت باید دوباره وارد شوی.</div>
+    <a href="/logout" class="btn btn-ghost">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+      خروج
+    </a>
+  </div>
+
+  <script>
+    function post(url, data, btn, onDone) {
+      btn.disabled = true;
+      App.request(url, { form: data })
+        .then(function (result) {
+          btn.disabled = false;
+          if (!result.ok) {
+            showError((result.data && result.data.message) || "انجام نشد");
+            return;
+          }
+          onDone(result.data);
+        })
+        .catch(function () {
+          btn.disabled = false;
+          showError("خطا در ارتباط با سرور");
+        });
+    }
+
+    document.getElementById("username-form").addEventListener("submit", function (e) {
+      e.preventDefault();
+      const username = document.getElementById("new-username").value.trim();
+      const currentPassword = document.getElementById("username-password").value;
+      if (!username || !currentPassword) return;
+
+      post("/account/username", { username: username, current_password: currentPassword },
+        document.getElementById("username-btn"), function (data) {
+          document.getElementById("account-username").textContent = data.username;
+          document.querySelector(".account-avatar").textContent = data.username.slice(0, 1).toUpperCase();
+          document.getElementById("username-password").value = "";
+          showSuccess("نام کاربری به «" + data.username + "» تغییر کرد");
+        });
+    });
+
+    document.getElementById("password-form").addEventListener("submit", function (e) {
+      e.preventDefault();
+      const currentPassword = document.getElementById("current-password").value;
+      const newPassword = document.getElementById("new-password").value;
+      const confirmPassword = document.getElementById("confirm-password").value;
+      if (!currentPassword || !newPassword || !confirmPassword) return;
+      if (newPassword !== confirmPassword) {
+        showError("تکرار رمز عبور جدید یکسان نیست.");
+        return;
+      }
+
+      post("/account/password",
+        { current_password: currentPassword, new_password: newPassword, confirm_password: confirmPassword },
+        document.getElementById("password-btn"), function () {
+          document.getElementById("current-password").value = "";
+          document.getElementById("new-password").value = "";
+          document.getElementById("confirm-password").value = "";
+          showSuccess("رمز عبور عوض شد");
+        });
+    });
+
+
+  </script>
+
+{% endblock %}
