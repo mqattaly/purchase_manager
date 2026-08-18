@@ -1,76 +1,89 @@
 {% extends "base.html" %}
-{% block title %}داشبورد · مدیریت خرید{% endblock %}
+{% block title %}ثبت سریع · مدیریت خرید{% endblock %}
 
 {% block content %}
 
   <div class="page-head">
     <div>
-      <h1 class="page-title">میز کار</h1>
-      <div class="page-sub">لیست خرید فروشگاه و انبار خودت را مدیریت کن</div>
+      <h1 class="page-title">ثبت سریع</h1>
+      <div class="page-sub">هرچه مشتری خواست و نداشتی، همین‌جا بزن — بدون معطلی ذخیره می‌شود</div>
+    </div>
+
+    <div class="stat-row">
+      <a href="/purchases" class="stat">
+        <span class="stat-num mono">{{ active_count }}</span>
+        <span class="stat-label">سفارش فعال</span>
+      </a>
+      <a href="/suppliers" class="stat">
+        <span class="stat-num mono">{{ suppliers|length }}</span>
+        <span class="stat-label">تأمین‌کننده</span>
+      </a>
+      <div class="stat">
+        <span class="stat-num mono">{{ archived_count }}</span>
+        <span class="stat-label">آرشیو شده</span>
+      </div>
     </div>
   </div>
 
-  <div class="tiles">
-
-    <a href="/new-purchase" class="tile tile-a">
-      <div class="tile-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>
-      </div>
+  {% if not suppliers %}
+    <div class="card card-pad callout">
+      <div class="callout-icon">🏭</div>
       <div>
-        <div class="tile-title">ثبت خرید جدید</div>
-        <div class="tile-desc">افزودن یک سفارش برای یک تأمین‌کننده</div>
+        <div class="callout-title">اول یک تأمین‌کننده بساز</div>
+        <div class="callout-text">در همان کادر «تأمین‌کننده» گزینه‌ی «＋ تأمین‌کننده جدید» را بزن — یک‌بار، بعد همیشه یادش می‌ماند.</div>
       </div>
-    </a>
+    </div>
+  {% endif %}
 
-    <a href="/purchases" class="tile tile-b">
-      <div class="tile-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>
-      </div>
-      <div>
-        <div class="tile-title">لیست همه خریدها</div>
-        <div class="tile-desc">سفارش‌های فعال کل سیستم</div>
-      </div>
-    </a>
+  {% include "partials/quick_add.html" %}
 
-    <a href="/suppliers" class="tile tile-c">
-      <div class="tile-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V9l7-4 7 4v12"/><path d="M10 21v-6h4v6M17 21V11l4-2v12"/></svg>
+  {% if recent %}
+    <div class="section-gap">
+      <div class="section-head">
+        <h3 class="section-title">آخرین سفارش‌های فعال</h3>
+        <a href="/purchases" class="link-more">همه</a>
       </div>
-      <div>
-        <div class="tile-title">تأمین‌کننده‌ها</div>
-        <div class="tile-desc">افزودن، ویرایش و آرشیو</div>
-      </div>
-    </a>
 
-    <a href="/import" class="tile tile-c">
-      <div class="tile-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-4-4m4 4 4-4"/><path d="M4 19h16"/></svg>
+      <div class="card table-scroll fade-up">
+        <table class="data">
+          <thead>
+            <tr>
+              <th>محصول</th>
+              <th>تأمین‌کننده</th>
+              <th>تعداد</th>
+              <th>واحد</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in recent %}
+              <tr onclick="location.href='/supplier/{{ item.supplier_id }}?highlight={{ item.id }}'" class="row-link">
+                <td>{{ item.product_name }}</td>
+                <td class="muted">{{ item.supplier.name }}</td>
+                <td class="mono">{{ item.quantity }}</td>
+                <td><span class="tag">{{ item.unit }}</span></td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
-      <div>
-        <div class="tile-title">ایمپورت اکسل</div>
-        <div class="tile-desc">وارد کردن چند خرید یک‌جا</div>
-      </div>
-    </a>
-
-  </div>
+    </div>
+  {% endif %}
 
   {% if suppliers %}
-  <div style="margin-top:34px;">
-    <h3 style="font-size:13.5px; color:var(--ink-soft); font-weight:600; margin:0 0 12px;">
-      🏭 دسترسی سریع به لیست هر تأمین‌کننده
-    </h3>
-    <div style="display:flex; flex-wrap:wrap; gap:10px;">
-      {% for supplier in suppliers %}
-        <a href="/supplier/{{ supplier.id }}"
-           style="display:inline-flex; align-items:center; gap:8px; padding:10px 16px; background:var(--surface); border:1px solid var(--border); border-radius:100px; text-decoration:none; color:var(--ink); font-size:13px; font-weight:600; box-shadow:var(--shadow-card); transition:transform .1s ease;"
-           onmouseover="this.style.transform='translateY(-2px)'"
-           onmouseout="this.style.transform='translateY(0)'">
-          <span style="width:7px; height:7px; border-radius:50%; background:var(--accent); display:inline-block;"></span>
-          {{ supplier.name }}
-        </a>
-      {% endfor %}
+    <div class="section-gap">
+      <div class="section-head">
+        <h3 class="section-title">لیست هر تأمین‌کننده</h3>
+        <a href="/suppliers" class="link-more">مدیریت</a>
+      </div>
+      <div class="chips">
+        {% for supplier in suppliers %}
+          <a href="/supplier/{{ supplier.id }}" class="chip" style="--i:{{ loop.index0 }}">
+            <span class="chip-dot"></span>
+            {{ supplier.name }}
+          </a>
+        {% endfor %}
+      </div>
     </div>
-  </div>
   {% endif %}
 
 {% endblock %}

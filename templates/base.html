@@ -3,8 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#142430">
   <title>{% block title %}مدیریت خرید{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ asset_v }}">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@500;600&display=swap" media="print" onload="this.media='all'">
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700&display=swap"></noscript>
+
+  <script src="{{ url_for('static', filename='app.js') }}?v={{ asset_v }}" defer></script>
 </head>
 <body>
 
@@ -15,7 +23,7 @@
         <div class="brand-mark">خ</div>
         <div class="brand-text">
           <span class="brand-title">مدیریت خرید</span>
-          <span class="brand-sub">purchase.db</span>
+          <span class="brand-sub">لیست خرید فروشگاه</span>
         </div>
       </div>
 
@@ -23,13 +31,8 @@
         <span class="nav-label">منو</span>
 
         <a href="/" class="{{ 'active' if request.path == '/' }}">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10v9a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1v-9"/></svg>
-          داشبورد
-        </a>
-
-        <a href="/new-purchase" class="{{ 'active' if request.path == '/new-purchase' }}">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>
-          ثبت خرید جدید
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+          ثبت سریع
         </a>
 
         <a href="/purchases" class="{{ 'active' if request.path == '/purchases' }}">
@@ -42,14 +45,14 @@
           تأمین‌کننده‌ها
         </a>
 
-        <a href="/import" class="{{ 'active' if request.path == '/import' }}">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-4-4m4 4 4-4"/><path d="M4 19h16"/></svg>
-          ایمپورت اکسل
-        </a>
-
         <a href="/search" class="{{ 'active' if request.path == '/search' }}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
           جستجوی محصول
+        </a>
+
+        <a href="/import" class="{{ 'active' if request.path == '/import' }}">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-4-4m4 4 4-4"/><path d="M4 19h16"/></svg>
+          ایمپورت اکسل
         </a>
 
         <a href="/account" class="{{ 'active' if request.path.startswith('/account') }}">
@@ -58,13 +61,15 @@
         </a>
       </nav>
 
-      <div style="margin-top:auto; padding:0 12px 8px; font-size:12px; color:#7E93A3;">
-        {% if current_user.is_authenticated %}{{ current_user.username }}{% endif %}
+      <div class="sidebar-user">
+        {% if current_user.is_authenticated %}
+          <span class="sidebar-avatar">{{ current_user.username[:1]|upper }}</span>
+          <span class="sidebar-username">{{ current_user.username }}</span>
+        {% endif %}
+        <a href="/logout" class="sidebar-logout" title="خروج">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+        </a>
       </div>
-      <a href="/logout" style="display:flex; align-items:center; gap:10px; padding:10px 12px; color:var(--sidebar-ink); text-decoration:none; font-size:13px;">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
-        خروج
-      </a>
 
       <div class="sidebar-footer">طراحی و توسعه س.م.قتالی</div>
     </aside>

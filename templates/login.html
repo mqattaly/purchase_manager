@@ -3,94 +3,80 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#142430">
   <title>{{ 'ثبت‌نام' if mode == 'signup' else 'ورود' }} · مدیریت خرید</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}?v={{ asset_v }}">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;500;600;700;800&display=swap" media="print" onload="this.media='all'">
+
   <style>
     .login-shell {
       min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: linear-gradient(180deg, #142430, #1C3040);
+      display: flex; align-items: center; justify-content: center;
+      background:
+        radial-gradient(900px 420px at 20% -10%, rgba(224,160,48,.18), transparent 60%),
+        radial-gradient(700px 380px at 90% 110%, rgba(47,111,118,.28), transparent 60%),
+        linear-gradient(170deg, #142430, #1B3142);
       padding: 20px;
     }
     .login-card {
-      width: 100%;
-      max-width: 340px;
+      width: 100%; max-width: 348px;
       background: var(--surface);
       border-radius: var(--radius-lg);
       box-shadow: var(--shadow-pop);
       padding: 30px 26px;
+      animation: fadeUp .34s var(--ease) both;
     }
-    .login-brand {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 22px;
-    }
+    .login-brand { display: flex; align-items: center; gap: 11px; margin-bottom: 6px; }
     .login-brand-mark {
-      width: 36px; height: 36px;
-      border-radius: 10px;
-      background: var(--accent);
+      width: 38px; height: 38px; border-radius: 11px;
+      background: linear-gradient(150deg, #E8AE43, var(--accent));
       display: flex; align-items: center; justify-content: center;
       font-weight: 800; color: var(--accent-ink);
+      box-shadow: 0 6px 16px rgba(224,160,48,.3);
     }
-    .login-brand-title { font-weight: 700; font-size: 15px; }
+    .login-brand-title { font-weight: 700; font-size: 15.5px; }
+    .login-tagline { font-size: 12.5px; color: var(--ink-soft); margin: 0 0 20px; }
     .login-field {
-      width: 100%;
-      height: 46px;
-      margin-bottom: 12px;
+      width: 100%; height: 46px; margin-bottom: 11px;
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
       padding: 0 14px;
-      font-size: 14px;
-      font-family: var(--font-body);
+      font-size: 14px; font-family: var(--font-body);
+      outline: none;
+      transition: border-color var(--fast), box-shadow var(--fast);
     }
+    .login-field:focus { border-color: var(--teal); box-shadow: var(--shadow-focus); }
     .login-btn {
-      width: 100%;
-      height: 46px;
-      border: none;
+      width: 100%; height: 46px; border: none;
       border-radius: var(--radius-sm);
-      background: var(--sidebar-bg);
-      color: #fff;
-      font-weight: 700;
-      font-size: 14px;
-      cursor: pointer;
-      margin-top: 6px;
+      background: var(--sidebar-bg); color: #fff;
+      font-weight: 700; font-size: 14px; font-family: var(--font-body);
+      cursor: pointer; margin-top: 6px;
+      transition: transform var(--fast), box-shadow var(--med), background var(--fast);
     }
-    .login-btn.signup {
-      background: var(--accent);
-      color: var(--accent-ink);
-    }
+    .login-btn:hover { transform: translateY(-1px); box-shadow: 0 10px 22px rgba(19,35,48,.26); }
+    .login-btn:active { transform: scale(.98); }
+    .login-btn.signup { background: linear-gradient(145deg, #E8AE43, var(--accent)); color: var(--accent-ink); }
     .login-error {
-      background: var(--danger-bg);
-      color: var(--danger);
-      font-size: 12.5px;
-      padding: 10px 12px;
-      border-radius: var(--radius-sm);
-      margin-bottom: 14px;
-    }
-    .login-switch {
-      text-align: center;
-      margin-top: 16px;
-      font-size: 12.5px;
-      color: var(--ink-soft);
-    }
-    .login-switch a {
-      color: var(--teal);
-      font-weight: 600;
-      text-decoration: none;
+      background: var(--danger-bg); color: var(--danger);
+      font-size: 12.5px; padding: 10px 12px;
+      border-radius: var(--radius-sm); margin-bottom: 14px;
+      animation: shake .3s var(--ease);
     }
     .login-hint {
-      font-size: 12px;
-      color: var(--ink-soft);
-      margin: -4px 0 14px;
-      line-height: 1.7;
+      background: var(--teal-soft); color: var(--teal);
+      font-size: 12px; padding: 9px 12px;
+      border-radius: var(--radius-sm); margin-bottom: 14px;
     }
+    .login-switch { text-align: center; margin-top: 16px; font-size: 12.5px; color: var(--ink-soft); }
+    .login-switch a { color: var(--teal); font-weight: 600; text-decoration: none; }
+    .login-switch a:hover { text-decoration: underline; }
   </style>
 </head>
 <body>
-
   <div class="login-shell">
     <div class="login-card">
       <div class="login-brand">
@@ -99,6 +85,7 @@
           {% if mode == 'signup' %}ساخت حساب جدید{% else %}مدیریت خرید{% endif %}
         </div>
       </div>
+      <p class="login-tagline">لیست خرید فروشگاه، سریع و بدون معطلی</p>
 
       {% if error %}
         <div class="login-error">{{ error }}</div>
@@ -126,6 +113,5 @@
       {% endif %}
     </div>
   </div>
-
 </body>
 </html>

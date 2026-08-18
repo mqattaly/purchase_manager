@@ -12,7 +12,6 @@
     <h1 class="page-title">{{ supplier.name }}</h1>
   </div>
 
-  <div id="message" class="flash" style="display:none;"></div>
 
   <h3 style="font-size:13.5px; color:var(--ink-soft); font-weight:600; margin:0 0 10px;">سفارش‌های فعال</h3>
 
@@ -133,22 +132,8 @@
     const HIGHLIGHT_ID = {{ highlight_id|tojson }};
     const UNITS = ["عدد", "کارتن", "بسته", "گونی", "کیلو"];
 
-    function showError(text) {
-      const el = document.getElementById("message");
-      el.className = "flash flash-error";
-      el.textContent = "! " + text;
-      el.style.display = "inline-flex";
-    }
 
-    function escapeHtml(text) {
-      const div = document.createElement("div");
-      div.textContent = text == null ? "" : text;
-      return div.innerHTML;
-    }
 
-    function escapeAttr(text) {
-      return String(text == null ? "" : text).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
-    }
 
     function itemFromRow(row) {
       return {
@@ -168,21 +153,6 @@
       row.dataset.description = item.description || "";
     }
 
-    function background(url, options, onFail) {
-      fetch(url, Object.assign({
-        method: "POST",
-        headers: { "X-Requested-With": "fetch" }
-      }, options || {}))
-        .then(function (res) {
-          return res.json().then(function (data) {
-            return { ok: res.ok && data.success !== false, data: data };
-          });
-        })
-        .then(function (result) {
-          if (!result.ok) onFail(result.data && result.data.message);
-        })
-        .catch(function () { onFail("خطا در ارتباط با سرور"); });
-    }
 
     function syncActiveEmpty() {
       const remaining = document.querySelectorAll("#active-body tr").length;

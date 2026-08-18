@@ -10,7 +10,6 @@
     </div>
   </div>
 
-  <div id="message" class="flash" style="display:none;"></div>
 
   <div class="card card-pad" style="margin-bottom:22px;">
     <div class="account-head">
@@ -68,16 +67,7 @@
   <script>
     function post(url, data, btn, onDone) {
       btn.disabled = true;
-      fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "fetch" },
-        body: new URLSearchParams(data)
-      })
-        .then(function (res) {
-          return res.json().then(function (payload) {
-            return { ok: res.ok && payload.success !== false, data: payload };
-          });
-        })
+      App.request(url, { form: data })
         .then(function (result) {
           btn.disabled = false;
           if (!result.ok) {
@@ -128,19 +118,7 @@
         });
     });
 
-    function showSuccess(text) {
-      const el = document.getElementById("message");
-      el.className = "flash flash-success";
-      el.textContent = "✓ " + text;
-      el.style.display = "inline-flex";
-    }
 
-    function showError(text) {
-      const el = document.getElementById("message");
-      el.className = "flash flash-error";
-      el.textContent = "! " + text;
-      el.style.display = "inline-flex";
-    }
   </script>
 
 {% endblock %}

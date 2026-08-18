@@ -10,7 +10,6 @@
     </div>
   </div>
 
-  <div id="message" class="flash" style="display:none;"></div>
 
   <div id="purchases-card" class="card" style="{{ 'display:none;' if not products }}">
     <div class="table-scroll">
@@ -95,19 +94,6 @@
       updateEmpty();
     }
 
-    function background(url, options, onFail) {
-      fetch(url, Object.assign({
-        method: "POST",
-        headers: { "X-Requested-With": "fetch" }
-      }, options || {}))
-        .then(function (res) {
-          return res.json().then(function (data) { return { ok: res.ok && data.success !== false, data: data }; });
-        })
-        .then(function (result) {
-          if (!result.ok) onFail(result.data && result.data.message);
-        })
-        .catch(function () { onFail("خطا در ارتباط با سرور"); });
-    }
 
     const CHECK_SVG = '<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"3.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M20 6 9 17l-5-5\"></path></svg>';
 
@@ -250,22 +236,8 @@
           '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button></td>';
     }
 
-    function escapeHtml(text) {
-      const div = document.createElement("div");
-      div.textContent = text == null ? "" : text;
-      return div.innerHTML;
-    }
 
-    function escapeAttr(text) {
-      return String(text == null ? "" : text).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
-    }
 
-    function showError(text) {
-      const el = document.getElementById("message");
-      el.className = "flash flash-error";
-      el.textContent = "! " + text;
-      el.style.display = "inline-flex";
-    }
   </script>
 
 {% endblock %}
