@@ -25,17 +25,14 @@
   <div class="card" id="supplier-list-card" style="{{ 'display:none;' if not suppliers }}">
     <div id="supplier-list">
       {% for supplier in suppliers %}
-        <div class="supplier-row" data-supplier-id="{{ supplier.id }}" style="{{ 'border-bottom:1px solid var(--border-soft);' if not loop.last }}">
+        <div class="supplier-row" data-supplier-id="{{ supplier.id }}" data-name="{{ supplier.name }}" style="{{ 'border-bottom:1px solid var(--border-soft);' if not loop.last }}">
           <a href="/supplier/{{ supplier.id }}" class="supplier-name">{{ supplier.name }}</a>
-          <a href="/supplier/{{ supplier.id }}/edit" class="icon-btn" title="ویرایش">
+          <button type="button" class="icon-btn" title="ویرایش" onclick="startEditSupplier({{ supplier.id }})">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
-          </a>
-          <form method="POST" action="/supplier/{{ supplier.id }}/delete"
-                onsubmit="return confirm('آیا مطمئنید؟ همه سفارش‌های این تأمین‌کننده هم پاک می‌شود.');">
-            <button type="submit" class="icon-btn danger" title="حذف">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>
-            </button>
-          </form>
+          </button>
+          <button type="button" class="icon-btn danger" title="حذف" onclick="deleteSupplier({{ supplier.id }})">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>
+          </button>
         </div>
       {% endfor %}
     </div>
@@ -65,18 +62,15 @@
         },
         body: new URLSearchParams({ name: name })
       })
-        .then(function (res) { return res.json(); })
-        .then(function (data) {
+        .then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
+        .then(function (result) {
           btn.disabled = false;
-
-          if (!data.success) {
-            showError(data.message);
+          if (!result.ok || !result.data.success) {
+            showError(result.data.message || "ثبت نشد");
             return;
           }
-
           showSuccess("تأمین‌کننده اضافه شد");
-          addSupplierRow(data.id, data.name);
-
+          addSupplierRow(result.data.id, result.data.name);
           input.value = "";
           input.focus();
         })
@@ -86,38 +80,143 @@
         });
     });
 
-    function addSupplierRow(id, name) {
-      document.getElementById("supplier-empty").style.display = "none";
-      const card = document.getElementById("supplier-list-card");
-      card.style.display = "block";
-
-      const list = document.getElementById("supplier-list");
-
-      const existingRows = list.querySelectorAll(".supplier-row");
-      existingRows.forEach(function (row) {
-        row.style.borderBottom = "1px solid var(--border-soft)";
+    function refreshBorders() {
+      const rows = document.querySelectorAll("#supplier-list .supplier-row");
+      rows.forEach(function (row, index) {
+        row.style.borderBottom = index === rows.length - 1 ? "none" : "1px solid var(--border-soft)";
       });
+    }
 
+    function syncEmpty() {
+      const count = document.querySelectorAll("#supplier-list .supplier-row").length;
+      document.getElementById("supplier-list-card").style.display = count ? "block" : "none";
+      document.getElementById("supplier-empty").style.display = count ? "none" : "block";
+      refreshBorders();
+    }
+
+    function rowHtml(id, name) {
+      return (
+        '<a href="/supplier/' + id + '" class="supplier-name">' + escapeHtml(name) + "</a>" +
+        '<button type="button" class="icon-btn" title="ویرایش" onclick="startEditSupplier(' + id + ')">' +
+          '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>' +
+        '<button type="button" class="icon-btn danger" title="حذف" onclick="deleteSupplier(' + id + ')">' +
+          '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button>'
+      );
+    }
+
+    function addSupplierRow(id, name) {
+      const list = document.getElementById("supplier-list");
       const row = document.createElement("div");
       row.className = "supplier-row";
-      row.setAttribute("data-supplier-id", id);
-      row.innerHTML =
-        '<a href="/supplier/' + id + '" class="supplier-name">' + escapeHtml(name) + '</a>' +
-        '<a href="/supplier/' + id + '/edit" class="icon-btn" title="ویرایش">' +
-        '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>' +
-        '</a>' +
-        '<form method="POST" action="/supplier/' + id + '/delete" onsubmit="return confirm(\'آیا مطمئنید؟ همه سفارش‌های این تأمین‌کننده هم پاک می‌شود.\');">' +
-        '<button type="submit" class="icon-btn danger" title="حذف">' +
-        '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>' +
-        '</button></form>';
-
+      row.dataset.supplierId = id;
+      row.dataset.name = name;
+      row.innerHTML = rowHtml(id, name);
       list.appendChild(row);
+      syncEmpty();
+    }
+
+    function deleteSupplier(id) {
+      if (!confirm("آیا مطمئنید؟ همه سفارش‌های این تأمین‌کننده هم پاک می‌شود.")) return;
+      const row = document.querySelector('[data-supplier-id="' + id + '"]');
+      if (!row) return;
+      const backup = { html: row.outerHTML, next: row.nextElementSibling, parent: row.parentNode };
+      row.remove();
+      syncEmpty();
+
+      fetch("/supplier/" + id + "/delete", {
+        method: "POST",
+        headers: { "X-Requested-With": "fetch" }
+      })
+        .then(function (res) { return res.json().then(function (data) { return { ok: res.ok && data.success !== false, data: data }; }); })
+        .then(function (result) {
+          if (result.ok) return;
+          restoreSupplier(backup);
+          showError((result.data && result.data.message) || "حذف انجام نشد");
+        })
+        .catch(function () {
+          restoreSupplier(backup);
+          showError("خطا در ارتباط با سرور");
+        });
+    }
+
+    function restoreSupplier(backup) {
+      const holder = document.createElement("div");
+      holder.innerHTML = backup.html;
+      const node = holder.firstElementChild;
+      if (backup.next && backup.next.parentNode === backup.parent) backup.parent.insertBefore(node, backup.next);
+      else backup.parent.appendChild(node);
+      syncEmpty();
+    }
+
+    function startEditSupplier(id) {
+      const row = document.querySelector('[data-supplier-id="' + id + '"]');
+      if (!row || row.classList.contains("editing")) return;
+      row.classList.add("editing");
+      const name = row.dataset.name || "";
+      row.innerHTML =
+        '<input class="field supplier-edit-input" style="flex:1; height:34px;" value="' + escapeAttr(name) + '">' +
+        '<button type="button" class="icon-btn" title="ذخیره" onclick="saveSupplier(' + id + ')">' +
+          '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></button>' +
+        '<button type="button" class="icon-btn" title="لغو" onclick="cancelSupplierEdit(' + id + ')">✕</button>';
+      const input = row.querySelector("input");
+      input.focus();
+      input.select();
+      input.addEventListener("keydown", function (event) {
+        if (event.key === "Enter") { event.preventDefault(); saveSupplier(id); }
+        if (event.key === "Escape") cancelSupplierEdit(id);
+      });
+    }
+
+    function cancelSupplierEdit(id) {
+      const row = document.querySelector('[data-supplier-id="' + id + '"]');
+      if (!row) return;
+      row.classList.remove("editing");
+      row.innerHTML = rowHtml(id, row.dataset.name || "");
+    }
+
+    function saveSupplier(id) {
+      const row = document.querySelector('[data-supplier-id="' + id + '"]');
+      const input = row.querySelector("input");
+      const name = input.value.trim();
+      if (!name) {
+        showError("نام تأمین‌کننده را وارد کنید.");
+        return;
+      }
+      const prev = row.dataset.name;
+      row.dataset.name = name;
+      row.classList.remove("editing");
+      row.innerHTML = rowHtml(id, name);
+
+      fetch("/supplier/" + id + "/edit", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "X-Requested-With": "fetch"
+        },
+        body: new URLSearchParams({ name: name })
+      })
+        .then(function (res) { return res.json().then(function (data) { return { ok: res.ok && data.success !== false, data: data }; }); })
+        .then(function (result) {
+          if (result.ok) return;
+          row.dataset.name = prev;
+          row.innerHTML = rowHtml(id, prev);
+          showError((result.data && result.data.message) || "ذخیره نشد");
+        })
+        .catch(function () {
+          row.dataset.name = prev;
+          row.innerHTML = rowHtml(id, prev);
+          showError("خطا در ارتباط با سرور");
+        });
     }
 
     function escapeHtml(text) {
       const div = document.createElement("div");
       div.textContent = text;
       return div.innerHTML;
+    }
+
+    function escapeAttr(text) {
+      return String(text == null ? "" : text).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
     }
 
     function showSuccess(text) {

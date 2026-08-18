@@ -181,6 +181,8 @@
       const tbody = document.getElementById("review-body");
       const row = document.createElement("tr");
       row.setAttribute("data-id", item.id);
+      row.dataset.supplierId = item.supplier_id || "";
+      row.dataset.supplierName = item.supplier_name || "";
       row.innerHTML = buildRowHtml(item);
       tbody.appendChild(row);
 
@@ -242,6 +244,16 @@
       const quantity = row.querySelector(".cell-quantity input").value.trim();
       const unit = row.querySelector(".cell-unit select").value;
       const description = row.querySelector(".cell-description input").value.trim();
+      const optimistic = {
+        id: id,
+        supplier_id: row.dataset.supplierId,
+        supplier_name: row.dataset.supplierName || "",
+        product_name: product,
+        quantity: quantity,
+        unit: unit,
+        description: description
+      };
+      row.innerHTML = buildRowHtml(optimistic);
 
       fetch("/product/" + id + "/edit", {
         method: "POST",
@@ -254,23 +266,48 @@
             row.innerHTML = buildRowHtml(data.product);
           } else {
             showError(data.message);
+            cancelEdit(id);
           }
+        })
+        .catch(function () {
+          showError("خطا در ارتباط با سرور");
+          cancelEdit(id);
         });
     }
 
     function deleteRow(id) {
       if (!confirm("این ردیف حذف شود؟")) return;
+      const row = document.querySelector('tr[data-id="' + id + '"]');
+      if (!row) return;
+      const next = row.nextElementSibling;
+      const parent = row.parentNode;
+      const backup = row.outerHTML;
+      row.remove();
+      updateCount();
 
       fetch("/product/" + id + "/delete", {
         method: "POST",
         headers: { "X-Requested-With": "fetch" }
       })
-        .then(function (res) { return res.json(); })
-        .then(function () {
-          const row = document.querySelector('tr[data-id="' + id + '"]');
-          row.remove();
-          updateCount();
+        .then(function (res) { return res.json().then(function (data) { return { ok: res.ok && data.success !== false }; }); })
+        .then(function (result) {
+          if (result.ok) return;
+          restoreReviewRow(parent, next, backup);
+          showError("حذف انجام نشد");
+        })
+        .catch(function () {
+          restoreReviewRow(parent, next, backup);
+          showError("خطا در ارتباط با سرور");
         });
+    }
+
+    function restoreReviewRow(parent, next, html) {
+      const holder = document.createElement("tbody");
+      holder.innerHTML = html;
+      const node = holder.firstElementChild;
+      if (next && next.parentNode === parent) parent.insertBefore(node, next);
+      else parent.appendChild(node);
+      updateCount();
     }
 
     function updateCount() {

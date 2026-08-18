@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ورود · مدیریت خرید</title>
+  <title>{{ 'ثبت‌نام' if mode == 'signup' else 'ورود' }} · مدیریت خرید</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <style>
     .login-shell {
@@ -58,6 +58,10 @@
       cursor: pointer;
       margin-top: 6px;
     }
+    .login-btn.signup {
+      background: var(--accent);
+      color: var(--accent-ink);
+    }
     .login-error {
       background: var(--danger-bg);
       color: var(--danger);
@@ -65,6 +69,23 @@
       padding: 10px 12px;
       border-radius: var(--radius-sm);
       margin-bottom: 14px;
+    }
+    .login-switch {
+      text-align: center;
+      margin-top: 16px;
+      font-size: 12.5px;
+      color: var(--ink-soft);
+    }
+    .login-switch a {
+      color: var(--teal);
+      font-weight: 600;
+      text-decoration: none;
+    }
+    .login-hint {
+      font-size: 12px;
+      color: var(--ink-soft);
+      margin: -4px 0 14px;
+      line-height: 1.7;
     }
   </style>
 </head>
@@ -74,18 +95,35 @@
     <div class="login-card">
       <div class="login-brand">
         <div class="login-brand-mark">خ</div>
-        <div class="login-brand-title">مدیریت خرید</div>
+        <div class="login-brand-title">
+          {% if mode == 'signup' %}ساخت حساب جدید{% else %}مدیریت خرید{% endif %}
+        </div>
       </div>
 
       {% if error %}
         <div class="login-error">{{ error }}</div>
       {% endif %}
 
-      <form method="POST" action="/login">
-        <input class="login-field" name="username" placeholder="نام کاربری" autocomplete="username" required autofocus>
-        <input class="login-field" name="password" type="password" placeholder="رمز عبور" autocomplete="current-password" required>
-        <button type="submit" class="login-btn">ورود</button>
-      </form>
+      {% if mode == 'signup' %}
+        <div class="login-hint">حسابت خالی است — تأمین‌کننده و کالاهای بقیه کاربران را نمی‌بینی.</div>
+        <form method="POST" action="/signup">
+          <input class="login-field" name="username" placeholder="نام کاربری" autocomplete="username" required autofocus>
+          <input class="login-field" name="password" type="password" placeholder="رمز عبور" autocomplete="new-password" required>
+          <button type="submit" class="login-btn signup">ساخت حساب</button>
+        </form>
+        <div class="login-switch">
+          قبلاً حساب ساختی؟ <a href="/login">وارد شو</a>
+        </div>
+      {% else %}
+        <form method="POST" action="/login">
+          <input class="login-field" name="username" placeholder="نام کاربری" autocomplete="username" required autofocus>
+          <input class="login-field" name="password" type="password" placeholder="رمز عبور" autocomplete="current-password" required>
+          <button type="submit" class="login-btn">ورود</button>
+        </form>
+        <div class="login-switch">
+          حساب نداری؟ <a href="/signup">ساخت کاربر جدید</a>
+        </div>
+      {% endif %}
     </div>
   </div>
 

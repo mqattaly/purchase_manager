@@ -6,7 +6,7 @@
   <div class="page-head">
     <div>
       <h1 class="page-title">🔍 جستجوی محصول</h1>
-      <div class="page-sub">بین همه تأمین‌کننده‌ها، فعال و آرشیوشده</div>
+      <div class="page-sub">همین‌طور که تایپ می‌کنی، بین کالاهای خودت می‌گردد</div>
     </div>
   </div>
 
@@ -24,7 +24,6 @@
         <th>تعداد</th>
         <th>نوع تعداد</th>
         <th>وضعیت</th>
-        <th></th>
       </tr>
       <tbody id="results-body"></tbody>
     </table>
@@ -32,26 +31,44 @@
 
   <script>
     let debounceTimer = null;
+    let activeRequest = null;
     const input = document.getElementById("search-input");
 
     input.addEventListener("input", function () {
+      scheduleSearch(input.value);
+    });
+
+    function scheduleSearch(raw) {
       clearTimeout(debounceTimer);
-      const q = input.value.trim();
+      const q = raw.trim();
 
       if (q.length < 2) {
+        if (activeRequest) activeRequest.abort();
         document.getElementById("results-card").style.display = "none";
         document.getElementById("search-status").textContent = q.length === 1 ? "حداقل ۲ حرف تایپ کن..." : "";
         return;
       }
 
       document.getElementById("search-status").textContent = "در حال جستجو...";
+      debounceTimer = setTimeout(function () { runSearch(q); }, 140);
+    }
 
-      debounceTimer = setTimeout(function () {
-        fetch("/api/search?q=" + encodeURIComponent(q))
-          .then(function (res) { return res.json(); })
-          .then(function (data) { renderResults(data.results, q); });
-      }, 300);
-    });
+    function runSearch(q) {
+      if (activeRequest) activeRequest.abort();
+      const controller = new AbortController();
+      activeRequest = controller;
+
+      fetch("/api/search?q=" + encodeURIComponent(q), { signal: controller.signal })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (input.value.trim() !== q) return;
+          renderResults(data.results || [], q);
+        })
+        .catch(function (err) {
+          if (err && err.name === "AbortError") return;
+          document.getElementById("search-status").textContent = "خطا در جستجو";
+        });
+    }
 
     function renderResults(results, q) {
       const body = document.getElementById("results-body");
@@ -64,27 +81,46 @@
         return;
       }
 
-      status.textContent = results.length + " نتیجه پیدا شد";
+      status.textContent = results.length + " نتیجه پیدا شد — روی ردیف بزن تا همان کالا هایلایت شود";
       card.style.display = "block";
 
       body.innerHTML = results.map(function (r) {
         const statusTag = r.ordered
-          ? '<span class="tag tag-success">آرشیو · ' + (r.ordered_date_label || "") + '</span>'
+          ? '<span class="tag tag-success">آرشیو · ' + escapeHtml(r.ordered_date_label || "") + "</span>"
           : '<span class="tag tag-accent">فعال</span>';
 
         return (
-          "<tr>" +
+          '<tr class="search-row" tabindex="0" data-href="/supplier/' + r.supplier_id + "?highlight=" + r.id + '">' +
           "<td>" + escapeHtml(r.supplier_name) + "</td>" +
-          "<td>" + escapeHtml(r.product_name) + "</td>" +
+          "<td>" + highlightMatch(r.product_name, q) + "</td>" +
           '<td class="mono">' + escapeHtml(r.quantity) + "</td>" +
           "<td><span class='tag'>" + escapeHtml(r.unit) + "</span></td>" +
           "<td>" + statusTag + "</td>" +
-          '<td><a href="/supplier/' + r.supplier_id + '" class="icon-btn" title="مشاهده تأمین‌کننده">' +
-          '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>' +
-          "</a></td>" +
           "</tr>"
         );
       }).join("");
+    }
+
+    document.getElementById("results-body").addEventListener("click", function (event) {
+      const row = event.target.closest("tr.search-row");
+      if (row && row.dataset.href) window.location.href = row.dataset.href;
+    });
+
+    document.getElementById("results-body").addEventListener("keydown", function (event) {
+      if (event.key !== "Enter") return;
+      const row = event.target.closest("tr.search-row");
+      if (row && row.dataset.href) window.location.href = row.dataset.href;
+    });
+
+    function highlightMatch(text, q) {
+      const src = text == null ? "" : String(text);
+      const idx = src.toLowerCase().indexOf(q.toLowerCase());
+      if (idx < 0) return escapeHtml(src);
+      return (
+        escapeHtml(src.slice(0, idx)) +
+        "<mark>" + escapeHtml(src.slice(idx, idx + q.length)) + "</mark>" +
+        escapeHtml(src.slice(idx + q.length))
+      );
     }
 
     function escapeHtml(text) {

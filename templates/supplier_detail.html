@@ -12,6 +12,8 @@
     <h1 class="page-title">{{ supplier.name }}</h1>
   </div>
 
+  <div id="message" class="flash" style="display:none;"></div>
+
   <h3 style="font-size:13.5px; color:var(--ink-soft); font-weight:600; margin:0 0 10px;">سفارش‌های فعال</h3>
 
   <div id="active-card" class="card table-scroll" style="margin-bottom:32px; {{ 'display:none;' if not products }}">
@@ -27,20 +29,24 @@
       </tr>
       <tbody id="active-body">
         {% for item in products %}
-        <tr data-id="{{ item.id }}">
-          <td>{{ item.product_name }}</td>
-          <td class="mono">{{ item.quantity }}</td>
-          <td><span class="tag">{{ item.unit }}</span></td>
-          <td>{{ item.description }}</td>
+        <tr data-id="{{ item.id }}"
+            data-product-name="{{ item.product_name }}"
+            data-quantity="{{ item.quantity }}"
+            data-unit="{{ item.unit }}"
+            data-description="{{ item.description or '' }}">
+          <td class="cell-product">{{ item.product_name }}</td>
+          <td class="mono cell-quantity">{{ item.quantity }}</td>
+          <td class="cell-unit"><span class="tag">{{ item.unit }}</span></td>
+          <td class="cell-description">{{ item.description }}</td>
           <td>
             <button type="button" class="icon-btn" title="ثبت سفارش" onclick="toggleOrder({{ item.id }})">
               <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="4"/></svg>
             </button>
           </td>
           <td>
-            <a href="/product/{{ item.id }}/edit" class="icon-btn" title="ویرایش">
+            <button type="button" class="icon-btn" title="ویرایش" onclick="startEdit({{ item.id }})">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
-            </a>
+            </button>
           </td>
           <td>
             <button type="button" class="icon-btn danger" title="حذف" onclick="deleteProduct({{ item.id }})">
@@ -86,11 +92,15 @@
             </tr>
             <tbody>
               {% for item in group.products %}
-              <tr data-id="{{ item.id }}">
-                <td>{{ item.product_name }}</td>
-                <td class="mono">{{ item.quantity }}</td>
-                <td><span class="tag tag-success">{{ item.unit }}</span></td>
-                <td>{{ item.description }}</td>
+              <tr data-id="{{ item.id }}"
+                  data-product-name="{{ item.product_name }}"
+                  data-quantity="{{ item.quantity }}"
+                  data-unit="{{ item.unit }}"
+                  data-description="{{ item.description or '' }}">
+                <td class="cell-product">{{ item.product_name }}</td>
+                <td class="mono cell-quantity">{{ item.quantity }}</td>
+                <td class="cell-unit"><span class="tag tag-success">{{ item.unit }}</span></td>
+                <td class="cell-description">{{ item.description }}</td>
                 <td>
                   <button type="button" class="icon-btn" title="بازگشت به لیست فعال" onclick="unarchiveProduct({{ item.id }})">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-1"/></svg>
@@ -117,79 +127,311 @@
   </div>
 
   <script>
-    function removeRow(id, { checkActiveEmpty = false } = {}) {
-      const row = document.querySelector('tr[data-id="' + id + '"]');
-      if (!row) return;
-      const parentGroup = row.closest("details.archive-group");
-      row.remove();
+    const SUPPLIER_ID = {{ supplier.id }};
+    const TODAY_ISO = {{ today_iso|tojson }};
+    const TODAY_LABEL = {{ today_label|tojson }};
+    const HIGHLIGHT_ID = {{ highlight_id|tojson }};
+    const UNITS = ["عدد", "کارتن", "بسته", "گونی", "کیلو"];
 
-      if (checkActiveEmpty) {
-        const remaining = document.querySelectorAll("#active-body tr").length;
-        if (remaining === 0) {
-          document.getElementById("active-card").style.display = "none";
-          document.getElementById("active-empty").style.display = "block";
-        }
-      }
+    function showError(text) {
+      const el = document.getElementById("message");
+      el.className = "flash flash-error";
+      el.textContent = "! " + text;
+      el.style.display = "inline-flex";
+    }
 
-      if (parentGroup) {
-        const remainingInGroup = parentGroup.querySelectorAll("tbody tr").length;
-        if (remainingInGroup === 0) {
-          parentGroup.remove();
-          checkArchiveEmpty();
-        } else {
-          parentGroup.querySelector(".count-num").textContent = remainingInGroup;
-        }
-      }
+    function escapeHtml(text) {
+      const div = document.createElement("div");
+      div.textContent = text == null ? "" : text;
+      return div.innerHTML;
+    }
+
+    function escapeAttr(text) {
+      return String(text == null ? "" : text).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    }
+
+    function itemFromRow(row) {
+      return {
+        id: Number(row.dataset.id),
+        product_name: row.dataset.productName || "",
+        quantity: row.dataset.quantity || "",
+        unit: row.dataset.unit || "",
+        description: row.dataset.description || ""
+      };
+    }
+
+    function setRowData(row, item) {
+      row.dataset.id = item.id;
+      row.dataset.productName = item.product_name || "";
+      row.dataset.quantity = item.quantity || "";
+      row.dataset.unit = item.unit || "";
+      row.dataset.description = item.description || "";
+    }
+
+    function background(url, options, onFail) {
+      fetch(url, Object.assign({
+        method: "POST",
+        headers: { "X-Requested-With": "fetch" }
+      }, options || {}))
+        .then(function (res) {
+          return res.json().then(function (data) {
+            return { ok: res.ok && data.success !== false, data: data };
+          });
+        })
+        .then(function (result) {
+          if (!result.ok) onFail(result.data && result.data.message);
+        })
+        .catch(function () { onFail("خطا در ارتباط با سرور"); });
+    }
+
+    function syncActiveEmpty() {
+      const remaining = document.querySelectorAll("#active-body tr").length;
+      document.getElementById("active-card").style.display = remaining ? "" : "none";
+      document.getElementById("active-empty").style.display = remaining ? "none" : "block";
     }
 
     function checkArchiveEmpty() {
       const wrap = document.getElementById("archive-wrap");
       if (wrap.querySelectorAll("details.archive-group").length === 0 && !document.getElementById("archive-empty")) {
-        wrap.innerHTML =
-          '<div class="card empty-state" id="archive-empty"><div class="empty-icon">📦</div>هنوز چیزی آرشیو نشده.</div>';
+        wrap.innerHTML = '<div class="card empty-state" id="archive-empty"><div class="empty-icon">📦</div>هنوز چیزی آرشیو نشده.</div>';
       }
     }
 
+    function updateGroupCount(group) {
+      if (!group) return;
+      const remaining = group.querySelectorAll("tbody tr[data-id]").length;
+      if (remaining === 0) {
+        group.remove();
+        checkArchiveEmpty();
+      } else {
+        group.querySelector(".count-num").textContent = remaining;
+      }
+    }
+
+    function activeRowHtml(item) {
+      return (
+        '<td class="cell-product">' + escapeHtml(item.product_name) + "</td>" +
+        '<td class="mono cell-quantity">' + escapeHtml(item.quantity) + "</td>" +
+        '<td class="cell-unit"><span class="tag">' + escapeHtml(item.unit) + "</span></td>" +
+        '<td class="cell-description">' + escapeHtml(item.description || "") + "</td>" +
+        '<td><button type="button" class="icon-btn" title="ثبت سفارش" onclick="toggleOrder(' + item.id + ')">' +
+          '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="4"/></svg></button></td>' +
+        '<td><button type="button" class="icon-btn" title="ویرایش" onclick="startEdit(' + item.id + ')">' +
+          '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button></td>' +
+        '<td><button type="button" class="icon-btn danger" title="حذف" onclick="deleteProduct(' + item.id + ')">' +
+          '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button></td>'
+      );
+    }
+
+    function archiveRowHtml(item) {
+      return (
+        '<td class="cell-product">' + escapeHtml(item.product_name) + "</td>" +
+        '<td class="mono cell-quantity">' + escapeHtml(item.quantity) + "</td>" +
+        '<td class="cell-unit"><span class="tag tag-success">' + escapeHtml(item.unit) + "</span></td>" +
+        '<td class="cell-description">' + escapeHtml(item.description || "") + "</td>" +
+        '<td><button type="button" class="icon-btn" title="بازگشت به لیست فعال" onclick="unarchiveProduct(' + item.id + ')">' +
+          '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-1"/></svg></button></td>' +
+        '<td><button type="button" class="icon-btn danger" title="حذف" onclick="deleteProduct(' + item.id + ')">' +
+          '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button></td>'
+      );
+    }
+
+    function makeRow(item, kind) {
+      const row = document.createElement("tr");
+      setRowData(row, item);
+      row.innerHTML = kind === "archive" ? archiveRowHtml(item) : activeRowHtml(item);
+      return row;
+    }
+
+    function ensureTodayGroup() {
+      let group = document.querySelector('details.archive-group[data-date-key="' + TODAY_ISO + '"]');
+      if (group) return group;
+
+      const empty = document.getElementById("archive-empty");
+      if (empty) empty.remove();
+
+      group = document.createElement("details");
+      group.className = "archive-group";
+      group.dataset.dateKey = TODAY_ISO;
+      group.open = true;
+      group.innerHTML =
+        '<summary class="archive-summary">' +
+          '<span class="archive-date"><span class="mono">' + escapeHtml(TODAY_LABEL) + '</span>' +
+          '<span class="archive-count">(<span class="count-num">0</span> مورد)</span></span>' +
+          '<button type="button" class="delete-group-btn" onclick="event.stopPropagation(); deleteGroup(\'' + TODAY_ISO + '\')">' +
+            '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"></path></svg>' +
+            "حذف همه</button></summary>" +
+        '<div class="archive-body table-scroll"><table class="data"><tr>' +
+          "<th>نام محصول</th><th>تعداد</th><th>نوع تعداد</th><th>توضیحات</th><th></th><th></th>" +
+        "</tr><tbody></tbody></table></div>";
+
+      const wrap = document.getElementById("archive-wrap");
+      wrap.insertBefore(group, wrap.firstChild);
+      return group;
+    }
+
     function toggleOrder(id) {
-      fetch("/toggle-order/" + id, { method: "POST", headers: { "X-Requested-With": "fetch" } })
-        .then(function (res) { return res.json(); })
-        .then(function (data) {
-          if (data.success) removeRow(id, { checkActiveEmpty: true });
-        });
+      const row = document.querySelector('#active-body tr[data-id="' + id + '"]');
+      if (!row) return;
+      const item = itemFromRow(row);
+      const next = row.nextElementSibling;
+      row.remove();
+      syncActiveEmpty();
+
+      const group = ensureTodayGroup();
+      const archiveRow = makeRow(item, "archive");
+      group.querySelector("tbody").insertBefore(archiveRow, group.querySelector("tbody").firstChild);
+      updateGroupCount(group);
+      group.open = true;
+
+      background("/toggle-order/" + id, null, function (msg) {
+        archiveRow.remove();
+        updateGroupCount(group);
+        const restored = makeRow(item, "active");
+        const body = document.getElementById("active-body");
+        if (next && next.parentNode === body) body.insertBefore(restored, next);
+        else body.appendChild(restored);
+        syncActiveEmpty();
+        showError(msg || "ثبت سفارش انجام نشد");
+      });
     }
 
     function unarchiveProduct(id) {
-      fetch("/unarchive/" + id, { method: "POST", headers: { "X-Requested-With": "fetch" } })
-        .then(function (res) { return res.json(); })
-        .then(function (data) {
-          if (data.success) window.location.reload();
-          // چون آیتم باید به لیست فعال منتقل شود (نه فقط حذف)، ساده‌ترین راه بازخوانی است
-        });
+      const row = document.querySelector('details.archive-group tr[data-id="' + id + '"]');
+      if (!row) return;
+      const item = itemFromRow(row);
+      const group = row.closest("details.archive-group");
+      const next = row.nextElementSibling;
+      row.remove();
+      updateGroupCount(group);
+
+      const activeRow = makeRow(item, "active");
+      document.getElementById("active-body").insertBefore(activeRow, document.getElementById("active-body").firstChild);
+      syncActiveEmpty();
+
+      background("/unarchive/" + id, null, function (msg) {
+        activeRow.remove();
+        syncActiveEmpty();
+        const restoredGroup = group && group.isConnected ? group : ensureTodayGroup();
+        const restored = makeRow(item, "archive");
+        const tbody = restoredGroup.querySelector("tbody");
+        if (next && next.parentNode === tbody) tbody.insertBefore(restored, next);
+        else tbody.appendChild(restored);
+        updateGroupCount(restoredGroup);
+        showError(msg || "بازگرداندن انجام نشد");
+      });
     }
 
     function deleteProduct(id) {
       if (!confirm("این محصول حذف شود؟")) return;
-      fetch("/product/" + id + "/delete", { method: "POST", headers: { "X-Requested-With": "fetch" } })
-        .then(function (res) { return res.json(); })
-        .then(function (data) {
-          if (data.success) removeRow(id, { checkActiveEmpty: true });
-        });
+      const row = document.querySelector('tr[data-id="' + id + '"]');
+      if (!row) return;
+      const item = itemFromRow(row);
+      const wasActive = !!row.closest("#active-body");
+      const group = row.closest("details.archive-group");
+      const next = row.nextElementSibling;
+      const parent = row.parentNode;
+      row.remove();
+      if (wasActive) syncActiveEmpty();
+      if (group) updateGroupCount(group);
+
+      background("/product/" + id + "/delete", null, function (msg) {
+        const restored = makeRow(item, wasActive ? "active" : "archive");
+        if (next && next.parentNode === parent) parent.insertBefore(restored, next);
+        else parent.appendChild(restored);
+        if (wasActive) syncActiveEmpty();
+        if (group) updateGroupCount(group);
+        showError(msg || "حذف انجام نشد");
+      });
     }
 
     function deleteGroup(dateKey) {
       if (!confirm("همه محصولات این تاریخ حذف شوند؟")) return;
-      fetch("/supplier/{{ supplier.id }}/archive/" + dateKey + "/delete", {
-        method: "POST",
-        headers: { "X-Requested-With": "fetch" }
-      })
-        .then(function (res) { return res.json(); })
-        .then(function (data) {
-          if (!data.success) return;
-          const group = document.querySelector('details.archive-group[data-date-key="' + dateKey + '"]');
-          if (group) group.remove();
-          checkArchiveEmpty();
-        });
+      const group = document.querySelector('details.archive-group[data-date-key="' + dateKey + '"]');
+      if (!group) return;
+      const backup = group.cloneNode(true);
+      const next = group.nextElementSibling;
+      const parent = group.parentNode;
+      group.remove();
+      checkArchiveEmpty();
+
+      background("/supplier/" + SUPPLIER_ID + "/archive/" + dateKey + "/delete", null, function (msg) {
+        const empty = document.getElementById("archive-empty");
+        if (empty) empty.remove();
+        if (next && next.parentNode === parent) parent.insertBefore(backup, next);
+        else parent.appendChild(backup);
+        showError(msg || "حذف گروه انجام نشد");
+      });
     }
+
+    function startEdit(id) {
+      const row = document.querySelector('#active-body tr[data-id="' + id + '"]');
+      if (!row || row.classList.contains("editing")) return;
+      row.classList.add("editing");
+      const item = itemFromRow(row);
+      row.querySelector(".cell-product").innerHTML = '<input class="field" style="height:34px; width:150px;" value="' + escapeAttr(item.product_name) + '">';
+      row.querySelector(".cell-quantity").innerHTML = '<input class="field mono" style="height:34px; width:80px;" type="number" value="' + escapeAttr(item.quantity) + '">';
+      row.querySelector(".cell-unit").innerHTML =
+        '<select class="field" style="height:34px; width:100px;">' +
+        UNITS.map(function (u) {
+          return '<option value="' + u + '"' + (u === item.unit ? " selected" : "") + ">" + u + "</option>";
+        }).join("") +
+        "</select>";
+      row.querySelector(".cell-description").innerHTML = '<input class="field" style="height:34px; width:170px;" value="' + escapeAttr(item.description) + '">';
+      const cells = row.querySelectorAll("td");
+      cells[5].innerHTML = '<button type="button" class="icon-btn" onclick="saveEdit(' + id + ')" title="ذخیره">' +
+        '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></button>';
+      cells[6].innerHTML = '<button type="button" class="icon-btn" onclick="cancelEdit(' + id + ')" title="لغو">✕</button>';
+    }
+
+    function cancelEdit(id) {
+      const row = document.querySelector('#active-body tr[data-id="' + id + '"]');
+      if (!row) return;
+      row.classList.remove("editing");
+      const item = itemFromRow(row);
+      row.innerHTML = activeRowHtml(item);
+    }
+
+    function saveEdit(id) {
+      const row = document.querySelector('#active-body tr[data-id="' + id + '"]');
+      const product = row.querySelector(".cell-product input").value.trim();
+      const quantity = row.querySelector(".cell-quantity input").value.trim();
+      const unit = row.querySelector(".cell-unit select").value;
+      const description = row.querySelector(".cell-description input").value.trim();
+      if (!product || !quantity || !unit) {
+        showError("اطلاعات محصول کامل نیست.");
+        return;
+      }
+
+      const prev = itemFromRow(row);
+      const next = { id: id, product_name: product, quantity: quantity, unit: unit, description: description };
+      setRowData(row, next);
+      row.classList.remove("editing");
+      row.innerHTML = activeRowHtml(next);
+
+      background("/product/" + id + "/edit", {
+        headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "fetch" },
+        body: new URLSearchParams({ product, quantity, unit, description })
+      }, function (msg) {
+        setRowData(row, prev);
+        row.innerHTML = activeRowHtml(prev);
+        showError(msg || "ذخیره نشد");
+      });
+    }
+
+    function highlightTarget() {
+      if (!HIGHLIGHT_ID) return;
+      const row = document.querySelector('tr[data-id="' + HIGHLIGHT_ID + '"]');
+      if (!row) return;
+      const group = row.closest("details.archive-group");
+      if (group) group.open = true;
+      row.classList.add("row-highlight");
+      setTimeout(function () {
+        row.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 40);
+    }
+
+    highlightTarget();
   </script>
 
 {% endblock %}
