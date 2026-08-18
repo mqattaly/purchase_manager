@@ -6,9 +6,11 @@
   <div class="page-head">
     <div>
       <h1 class="page-title">📋 لیست همه خریدها</h1>
-      <div class="page-sub">سفارش‌های فعال کل سیستم، از همه تأمین‌کننده‌ها</div>
+      <div class="page-sub">سفارش‌های فعال خودت، از همه تأمین‌کننده‌ها</div>
     </div>
   </div>
+
+  <div id="message" class="flash" style="display:none;"></div>
 
   <div id="purchases-card" class="card" style="{{ 'display:none;' if not products }}">
     <div class="table-scroll">
@@ -20,18 +22,36 @@
           <th>نوع تعداد</th>
           <th>توضیحات</th>
           <th>سفارش</th>
+          <th></th>
+          <th></th>
         </tr>
         <tbody id="purchases-body">
           {% for item in products %}
-          <tr data-id="{{ item.id }}">
-            <td>{{ item.supplier.name }}</td>
-            <td>{{ item.product_name }}</td>
-            <td class="mono">{{ item.quantity }}</td>
-            <td><span class="tag">{{ item.unit }}</span></td>
-            <td>{{ item.description }}</td>
+          <tr data-id="{{ item.id }}"
+              data-supplier-id="{{ item.supplier_id }}"
+              data-supplier-name="{{ item.supplier.name }}"
+              data-product-name="{{ item.product_name }}"
+              data-quantity="{{ item.quantity }}"
+              data-unit="{{ item.unit }}"
+              data-description="{{ item.description or '' }}">
+            <td class="cell-supplier">{{ item.supplier.name }}</td>
+            <td class="cell-product">{{ item.product_name }}</td>
+            <td class="mono cell-quantity">{{ item.quantity }}</td>
+            <td class="cell-unit"><span class="tag">{{ item.unit }}</span></td>
+            <td class="cell-description">{{ item.description }}</td>
             <td>
               <button type="button" class="icon-btn" title="ثبت سفارش" onclick="toggleOrder({{ item.id }})">
                 <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="4"/></svg>
+              </button>
+            </td>
+            <td>
+              <button type="button" class="icon-btn" title="ویرایش" onclick="startEdit({{ item.id }})">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+              </button>
+            </td>
+            <td>
+              <button type="button" class="icon-btn danger" title="حذف" onclick="deleteProduct({{ item.id }})">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>
               </button>
             </td>
           </tr>
@@ -43,27 +63,183 @@
 
   <div id="purchases-empty" class="card empty-state" style="{{ 'display:none;' if products }}">
     <div class="empty-icon">📭</div>
-    هیچ سفارش فعالی تو کل سیستم ثبت نشده.
+    هیچ سفارش فعالی ثبت نشده.
   </div>
 
   <script>
-    function toggleOrder(id) {
-      fetch("/toggle-order/" + id, {
+    const UNITS = ["عدد", "کارتن", "بسته", "گونی", "کیلو"];
+
+    function updateEmpty() {
+      const remaining = document.querySelectorAll("#purchases-body tr").length;
+      document.getElementById("purchases-card").style.display = remaining ? "block" : "none";
+      document.getElementById("purchases-empty").style.display = remaining ? "none" : "block";
+    }
+
+    function snapshotRow(row) {
+      return { html: row.outerHTML, next: row.nextElementSibling, parent: row.parentNode };
+    }
+
+    function restoreRow(snap) {
+      if (!snap || !snap.parent) return;
+      const holder = document.createElement("tbody");
+      holder.innerHTML = snap.html;
+      const node = holder.firstElementChild;
+      if (snap.next && snap.next.parentNode === snap.parent) snap.parent.insertBefore(node, snap.next);
+      else snap.parent.appendChild(node);
+      updateEmpty();
+    }
+
+    function background(url, options, onFail) {
+      fetch(url, Object.assign({
         method: "POST",
         headers: { "X-Requested-With": "fetch" }
-      })
-        .then(function (res) { return res.json(); })
-        .then(function (data) {
-          if (!data.success) return;
-          const row = document.querySelector('tr[data-id="' + id + '"]');
-          row.remove();
+      }, options || {}))
+        .then(function (res) {
+          return res.json().then(function (data) { return { ok: res.ok && data.success !== false, data: data }; });
+        })
+        .then(function (result) {
+          if (!result.ok) onFail(result.data && result.data.message);
+        })
+        .catch(function () { onFail("خطا در ارتباط با سرور"); });
+    }
 
-          const remaining = document.querySelectorAll("#purchases-body tr").length;
-          if (remaining === 0) {
-            document.getElementById("purchases-card").style.display = "none";
-            document.getElementById("purchases-empty").style.display = "block";
-          }
-        });
+    function toggleOrder(id) {
+      const row = document.querySelector('tr[data-id="' + id + '"]');
+      if (!row) return;
+      const snap = snapshotRow(row);
+      row.remove();
+      updateEmpty();
+      background("/toggle-order/" + id, null, function (msg) {
+        restoreRow(snap);
+        showError(msg || "ثبت سفارش انجام نشد");
+      });
+    }
+
+    function deleteProduct(id) {
+      if (!confirm("این محصول حذف شود؟")) return;
+      const row = document.querySelector('tr[data-id="' + id + '"]');
+      if (!row) return;
+      const snap = snapshotRow(row);
+      row.remove();
+      updateEmpty();
+      background("/product/" + id + "/delete", null, function (msg) {
+        restoreRow(snap);
+        showError(msg || "حذف انجام نشد");
+      });
+    }
+
+    function startEdit(id) {
+      const row = document.querySelector('tr[data-id="' + id + '"]');
+      if (!row || row.classList.contains("editing")) return;
+      row.classList.add("editing");
+      const product = row.dataset.productName || "";
+      const quantity = row.dataset.quantity || "";
+      const unit = row.dataset.unit || "";
+      const description = row.dataset.description || "";
+
+      row.querySelector(".cell-product").innerHTML = '<input class="field" style="height:34px; width:150px;" value="' + escapeAttr(product) + '">';
+      row.querySelector(".cell-quantity").innerHTML = '<input class="field mono" style="height:34px; width:80px;" type="number" value="' + escapeAttr(quantity) + '">';
+      row.querySelector(".cell-unit").innerHTML =
+        '<select class="field" style="height:34px; width:100px;">' +
+        UNITS.map(function (u) {
+          return '<option value="' + u + '"' + (u === unit ? " selected" : "") + ">" + u + "</option>";
+        }).join("") +
+        "</select>";
+      row.querySelector(".cell-description").innerHTML = '<input class="field" style="height:34px; width:170px;" value="' + escapeAttr(description) + '">';
+
+      const cells = row.querySelectorAll("td");
+      cells[6].innerHTML = '<button type="button" class="icon-btn" onclick="saveEdit(' + id + ')" title="ذخیره">' +
+        '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></button>';
+      cells[7].innerHTML = '<button type="button" class="icon-btn" onclick="cancelEdit(' + id + ')" title="لغو">✕</button>';
+    }
+
+    function cancelEdit(id) {
+      const row = document.querySelector('tr[data-id="' + id + '"]');
+      if (!row) return;
+      row.classList.remove("editing");
+      paintPurchaseRow(row, {
+        supplier_name: row.dataset.supplierName,
+        product_name: row.dataset.productName,
+        quantity: row.dataset.quantity,
+        unit: row.dataset.unit,
+        description: row.dataset.description
+      });
+    }
+
+    function saveEdit(id) {
+      const row = document.querySelector('tr[data-id="' + id + '"]');
+      const product = row.querySelector(".cell-product input").value.trim();
+      const quantity = row.querySelector(".cell-quantity input").value.trim();
+      const unit = row.querySelector(".cell-unit select").value;
+      const description = row.querySelector(".cell-description input").value.trim();
+      if (!product || !quantity || !unit) {
+        showError("اطلاعات محصول کامل نیست.");
+        return;
+      }
+
+      const prev = {
+        product_name: row.dataset.productName,
+        quantity: row.dataset.quantity,
+        unit: row.dataset.unit,
+        description: row.dataset.description
+      };
+
+      row.dataset.productName = product;
+      row.dataset.quantity = quantity;
+      row.dataset.unit = unit;
+      row.dataset.description = description;
+      row.classList.remove("editing");
+      paintPurchaseRow(row, {
+        supplier_name: row.dataset.supplierName,
+        product_name: product,
+        quantity: quantity,
+        unit: unit,
+        description: description
+      });
+
+      background("/product/" + id + "/edit", {
+        headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "fetch" },
+        body: new URLSearchParams({ product, quantity, unit, description })
+      }, function (msg) {
+        row.dataset.productName = prev.product_name;
+        row.dataset.quantity = prev.quantity;
+        row.dataset.unit = prev.unit;
+        row.dataset.description = prev.description;
+        paintPurchaseRow(row, Object.assign({ supplier_name: row.dataset.supplierName }, prev));
+        showError(msg || "ذخیره نشد");
+      });
+    }
+
+    function paintPurchaseRow(row, item) {
+      row.innerHTML =
+        '<td class="cell-supplier">' + escapeHtml(item.supplier_name) + "</td>" +
+        '<td class="cell-product">' + escapeHtml(item.product_name) + "</td>" +
+        '<td class="mono cell-quantity">' + escapeHtml(item.quantity) + "</td>" +
+        '<td class="cell-unit"><span class="tag">' + escapeHtml(item.unit) + "</span></td>" +
+        '<td class="cell-description">' + escapeHtml(item.description || "") + "</td>" +
+        '<td><button type="button" class="icon-btn" title="ثبت سفارش" onclick="toggleOrder(' + row.dataset.id + ')">' +
+          '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="4"/></svg></button></td>' +
+        '<td><button type="button" class="icon-btn" title="ویرایش" onclick="startEdit(' + row.dataset.id + ')">' +
+          '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button></td>' +
+        '<td><button type="button" class="icon-btn danger" title="حذف" onclick="deleteProduct(' + row.dataset.id + ')">' +
+          '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button></td>';
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement("div");
+      div.textContent = text == null ? "" : text;
+      return div.innerHTML;
+    }
+
+    function escapeAttr(text) {
+      return String(text == null ? "" : text).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
+    }
+
+    function showError(text) {
+      const el = document.getElementById("message");
+      el.className = "flash flash-error";
+      el.textContent = "! " + text;
+      el.style.display = "inline-flex";
     }
   </script>
 

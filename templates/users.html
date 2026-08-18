@@ -6,7 +6,7 @@
   <div class="page-head">
     <div>
       <h1 class="page-title">👤 کاربران</h1>
-      <div class="page-sub">افزودن حساب برای دستگاه‌ها یا افراد جدید</div>
+      <div class="page-sub">هر کاربر حساب خالی خودش را دارد و کالاهای بقیه را نمی‌بیند</div>
     </div>
   </div>
 
@@ -104,19 +104,35 @@
 
     function deleteUser(id) {
       if (!confirm("این کاربر حذف شود؟")) return;
+      const row = document.querySelector('[data-user-id="' + id + '"]');
+      if (!row) return;
+      const next = row.nextElementSibling;
+      const parent = row.parentNode;
+      const backup = row.outerHTML;
+      row.remove();
 
       fetch("/users/" + id + "/delete", {
         method: "POST",
         headers: { "X-Requested-With": "fetch" }
       })
-        .then(function (res) { return res.json(); })
-        .then(function (data) {
-          if (!data.success) {
-            showError(data.message);
-            return;
-          }
-          document.querySelector('[data-user-id="' + id + '"]').remove();
+        .then(function (res) { return res.json().then(function (data) { return { ok: res.ok && data.success !== false, data: data }; }); })
+        .then(function (result) {
+          if (result.ok) return;
+          restoreUserRow(parent, next, backup);
+          showError((result.data && result.data.message) || "حذف انجام نشد");
+        })
+        .catch(function () {
+          restoreUserRow(parent, next, backup);
+          showError("خطا در ارتباط با سرور");
         });
+    }
+
+    function restoreUserRow(parent, next, html) {
+      const holder = document.createElement("div");
+      holder.innerHTML = html;
+      const node = holder.firstElementChild;
+      if (next && next.parentNode === parent) parent.insertBefore(node, next);
+      else parent.appendChild(node);
     }
 
     function escapeHtml(text) {

@@ -359,6 +359,33 @@ table.data td {
 table.data tr:last-child td { border-bottom: none; }
 table.data tbody tr:hover { background: var(--surface-muted); }
 
+table.data tbody tr.search-row { cursor: pointer; }
+table.data tbody tr.search-row:hover { background: var(--accent-soft); }
+
+table.data tbody tr.row-highlight td {
+  background: #F8E2A8 !important;
+  box-shadow: inset 0 0 0 1px #E0A030;
+  animation: highlightFade 2.8s ease 1.6s forwards;
+}
+
+table.data tbody tr[data-id] {
+  scroll-margin-top: 80px;
+}
+
+@keyframes highlightFade {
+  to {
+    background: transparent;
+    box-shadow: none;
+  }
+}
+
+mark {
+  background: #F6D27A;
+  color: inherit;
+  padding: 0 2px;
+  border-radius: 3px;
+}
+
 .mono { font-family: var(--font-mono); font-size: 12.5px; }
 
 /* ============ Tags / badges ============ */
