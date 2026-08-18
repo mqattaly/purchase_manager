@@ -11,7 +11,7 @@
   </div>
 
   <div class="card card-pad" style="margin-bottom:20px;">
-    <input id="search-input" class="field" style="width:100%; max-width:420px;" placeholder="نام محصول را تایپ کن..." autocomplete="off" autofocus>
+    <input id="search-input" class="field" style="width:100%; max-width:420px;" value="{{ request.args.get('q', '') }}" placeholder="نام محصول یا تأمین‌کننده را تایپ کن..." autocomplete="off" autofocus>
   </div>
 
   <div id="search-status" style="font-size:12.5px; color:var(--ink-faint); margin-bottom:10px;"></div>
@@ -37,6 +37,8 @@
     input.addEventListener("input", function () {
       scheduleSearch(input.value);
     });
+
+    if (input.value.trim()) scheduleSearch(input.value);
 
     function scheduleSearch(raw) {
       clearTimeout(debounceTimer);

@@ -37,6 +37,34 @@
 
   {% include "partials/quick_add.html" %}
 
+  {% if suppliers %}
+    <div class="section-gap supplier-home-section">
+      <div class="section-head">
+        <h3 class="section-title">تأمین‌کننده‌ها</h3>
+        <a href="/suppliers" class="link-more">مدیریت</a>
+      </div>
+      <div class="supplier-card-grid">
+        {% for supplier in suppliers %}
+          {% set supplier_active = supplier_active_counts.get(supplier.id, 0) %}
+          <a
+            href="/supplier/{{ supplier.id }}"
+            class="supplier-home-card"
+            style="--i:{{ loop.index0 }}"
+            aria-label="مشاهده سفارش‌های {{ supplier.name }}"
+          >
+            <span class="supplier-card-avatar">{{ supplier.name[:1] }}</span>
+            <span class="supplier-card-copy">
+              <strong>{{ supplier.name }}</strong>
+              <small>{{ supplier_active }} سفارش فعال</small>
+            </span>
+            <span class="supplier-card-count mono">{{ supplier_active }}</span>
+            <svg class="supplier-card-arrow" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+          </a>
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+
   {% if recent %}
     <div class="section-gap">
       <div class="section-head">
@@ -65,23 +93,6 @@
             {% endfor %}
           </tbody>
         </table>
-      </div>
-    </div>
-  {% endif %}
-
-  {% if suppliers %}
-    <div class="section-gap">
-      <div class="section-head">
-        <h3 class="section-title">لیست هر تأمین‌کننده</h3>
-        <a href="/suppliers" class="link-more">مدیریت</a>
-      </div>
-      <div class="chips">
-        {% for supplier in suppliers %}
-          <a href="/supplier/{{ supplier.id }}" class="chip" style="--i:{{ loop.index0 }}">
-            <span class="chip-dot"></span>
-            {{ supplier.name }}
-          </a>
-        {% endfor %}
       </div>
     </div>
   {% endif %}
