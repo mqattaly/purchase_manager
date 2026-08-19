@@ -1,4 +1,5 @@
 import os
+import secrets
 from datetime import date
 
 from dotenv import load_dotenv
@@ -103,6 +104,8 @@ class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(100), unique=True, nullable=False)
     password_hash = db.Column(db.String(300), nullable=False)
+     # کلید شخصی برای ثبت از بیرون اپ (مثلاً Shortcuts آیفون)
+    api_token = db.Column(db.String(64), unique=True, nullable=True)
 
 
 @login_manager.user_loader
@@ -126,6 +129,33 @@ def product_payload(product, supplier_name=None):
         "ordered_date_label": shamsi_label(product.ordered_date),
     }
 
+def issue_api_token(user):
+    """یک کلید تازه می‌سازد و ذخیره می‌کند."""
+    user.api_token = secrets.token_urlsafe(24)
+    db.session.commit()
+    return user.api_token
+
+
+def ensure_api_token(user):
+    return user.api_token or issue_api_token(user)
+
+
+def user_from_api_token():
+    """کاربر را از روی کلید در هدر، Bearer یا پارامتر URL پیدا می‌کند."""
+    token = (
+        request.headers.get("X-API-Key")
+        or request.values.get("key")
+        or ""
+    ).strip()
+
+    if not token:
+        auth = request.headers.get("Authorization", "")
+        if auth.lower().startswith("bearer "):
+            token = auth[7:].strip()
+
+    if not token:
+        return None
+    return User.query.filter_by(api_token=token).first()
 
 def json_error(message, status=400):
     return {"success": False, "message": message}, status
@@ -227,9 +257,17 @@ def ensure_schema():
         if cols and "owner_id" not in cols:
             missing_owner_cols.append(table)
 
+        user_cols = _table_columns("user")
+
     with db.engine.begin() as conn:
         for table in missing_owner_cols:
             conn.execute(text(f"ALTER TABLE {table} ADD COLUMN owner_id INTEGER"))
+
+        if user_cols and "api_token" not in user_cols:
+            try:
+                conn.execute(text('ALTER TABLE "user" ADD COLUMN api_token VARCHAR(64)'))
+            except Exception:
+                pass
         try:
             conn.execute(
                 text(
@@ -298,7 +336,7 @@ def _prepare_request():
             # Retry on the next request if the database is temporarily unavailable.
             pass
 
-    allowed = {"login", "signup", "static"}
+        allowed = {"login", "signup", "static", "api_quick_add", "api_suppliers"}
     if request.endpoint in allowed or request.endpoint is None:
         return
     if not current_user.is_authenticated:
@@ -898,6 +936,126 @@ def import_excel():
         errors=errors if errors else None,
     )
 
+# ---------------------------------------------------------------------------
+#  API کلیددار — برای ثبت از بیرون اپ (Shortcuts آیفون، ویجت، هر چیز دیگر)
+# ---------------------------------------------------------------------------
+
+
+def resolve_supplier(user, raw):
+    """تأمین‌کننده را از روی شناسه یا نام پیدا می‌کند؛ نبود، می‌سازدش."""
+    raw = (raw or "").strip()
+
+    if raw.isdigit():
+        found = Supplier.query.filter_by(id=int(raw), owner_id=user.id).first()
+        if found:
+            return found, False
+
+    if raw:
+        target = normalize_name(raw)
+        for supplier in Supplier.query.filter_by(owner_id=user.id).all():
+            if normalize_name(supplier.name) == target:
+                return supplier, False
+
+        created = Supplier(name=raw, owner_id=user.id)
+        db.session.add(created)
+        db.session.flush()
+        return created, True
+
+    # چیزی نفرستاده: آخرین تأمین‌کننده‌ای که برایش ثبت کرده
+    last = (
+        Product.query.filter_by(owner_id=user.id)
+        .order_by(Product.id.desc())
+        .first()
+    )
+    if last:
+        return db.session.get(Supplier, last.supplier_id), False
+
+    first = Supplier.query.filter_by(owner_id=user.id).order_by(Supplier.id).first()
+    if first:
+        return first, False
+
+    created = Supplier(name="نامشخص", owner_id=user.id)
+    db.session.add(created)
+    db.session.flush()
+    return created, True
+
+
+@app.route("/api/quick-add", methods=["GET", "POST"])
+def api_quick_add():
+    """ثبت یک کالا فقط با کلید شخصی — بدون لاگین.
+
+    نمونه:
+      POST /api/quick-add
+      X-API-Key: <کلید>
+      {"product": "روغن", "quantity": "2", "unit": "عدد", "supplier": "یونس زاده"}
+    """
+    user = user_from_api_token()
+    if not user:
+        return json_error("کلید معتبر نیست.", 401)
+
+    body = request.get_json(silent=True) or {}
+
+    def field(name, default=""):
+        value = request.values.get(name)
+        if value is None:
+            value = body.get(name, default)
+        return str(value if value is not None else default).strip()
+
+    product_name = field("product") or field("name") or field("text")
+    if not product_name:
+        return json_error("نام محصول را بفرست.")
+
+    quantity = field("quantity") or field("qty") or "1"
+    unit = field("unit") or UNIT_TYPES[0]
+    if unit not in UNIT_TYPES:
+        return json_error("واحد باید یکی از این‌ها باشد: " + "، ".join(UNIT_TYPES))
+
+    supplier, supplier_created = resolve_supplier(user, field("supplier"))
+
+    product = Product(
+        owner_id=user.id,
+        supplier_id=supplier.id,
+        product_name=product_name,
+        quantity=quantity,
+        unit=unit,
+        description=field("description"),
+    )
+    db.session.add(product)
+    db.session.commit()
+
+    message = f"«{product_name}» {quantity} {unit} برای {supplier.name} ثبت شد"
+    if supplier_created:
+        message += " (تأمین‌کننده جدید ساخته شد)"
+
+    return {
+        "success": True,
+        "message": message,
+        "product": product_payload(product, supplier.name),
+    }
+
+
+@app.route("/api/suppliers")
+def api_suppliers():
+    """لیست تأمین‌کننده‌ها برای منوی انتخابی در Shortcuts."""
+    user = user_from_api_token()
+    if not user:
+        return json_error("کلید معتبر نیست.", 401)
+
+    rows = (
+        Supplier.query.filter_by(owner_id=user.id).order_by(Supplier.name).all()
+    )
+    return {
+        "success": True,
+        "units": UNIT_TYPES,
+        "suppliers": [{"id": s.id, "name": s.name} for s in rows],
+    }
+
+
+@app.route("/account/token", methods=["POST"])
+def regenerate_token():
+    user = db.session.get(User, current_user.id)
+    token = issue_api_token(user)
+    return {"success": True, "token": token}
 
 @app.route("/account")
 def account():
@@ -906,11 +1064,15 @@ def account():
     active_count = Product.query.filter_by(owner_id=current_user.id, ordered=False).count()
     archived_count = Product.query.filter_by(owner_id=current_user.id, ordered=True).count()
 
+    user = db.session.get(User, current_user.id)
+
     return render_template(
         "account.html",
         supplier_count=supplier_count,
         active_count=active_count,
         archived_count=archived_count,
+        api_token=ensure_api_token(user),
+        api_base=request.url_root.rstrip("/"),
     )
 
 
