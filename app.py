@@ -336,7 +336,7 @@ def _prepare_request():
             # Retry on the next request if the database is temporarily unavailable.
             pass
 
-        allowed = {"login", "signup", "static", "api_quick_add", "api_suppliers"}
+    allowed = {"login", "signup", "static", "api_quick_add", "api_suppliers"}
     if request.endpoint in allowed or request.endpoint is None:
         return
     if not current_user.is_authenticated:
