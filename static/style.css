@@ -997,6 +997,14 @@ td.cell-order, th.col-order {
 .account-stat-label { font-size: 12px; color: var(--ink-soft); }
 .account-section-title { font-size: 13.5px; font-weight: 700; margin: 0 0 14px; }
 
+.token-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.token-row .field { font-size: 12px; direction: ltr; text-align: left; }
+code {
+  font-family: var(--font-mono); font-size: 11.5px;
+  background: var(--surface-muted); border: 1px solid var(--border-soft);
+  border-radius: 5px; padding: 1px 5px;
+}
+
 /* ======================= 12. motion & responsive ======================= */
 
 @keyframes fadeUp {
