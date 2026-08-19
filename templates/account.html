@@ -6,7 +6,7 @@
   <div class="page-head">
     <div>
       <h1 class="page-title">👤 حساب من</h1>
-      <div class="page-sub">اطلاعات حساب خودت — هیچ‌کس حساب دیگری را نمی‌بیند و نمی‌تواند حذف کند</div>
+      <div class="page-sub">اطلاعات حساب — اینجا میتونی حساب کاربریتو مدیریت کنی .</div>
     </div>
   </div>
 
@@ -53,6 +53,34 @@
       <input id="confirm-password" class="field" style="width:170px" type="password" placeholder="تکرار رمز جدید" autocomplete="new-password" required>
       <button id="password-btn" type="submit" class="btn btn-accent">ذخیره رمز عبور</button>
     </form>
+  </div>
+
+  <div class="card card-pad" style="margin-bottom:22px;">
+    <h3 class="account-section-title">🔑 ثبت از گوشی (Shortcuts آیفون)</h3>
+    <div class="page-sub" style="margin-bottom:14px;">
+      با این کلید می‌توانی بدون باز کردن اپ و بدون لاگین، از میان‌بر آیفون یا سیری کالا ثبت کنی.
+      کلید را جای امن نگه دار؛ هرکس داشته باشد می‌تواند در حساب تو ثبت کند.
+    </div>
+
+    <div class="token-row">
+      <input id="api-token" class="field mono" readonly value="{{ api_token }}" style="flex:1; min-width:220px;">
+      <button type="button" class="btn btn-ghost" onclick="copyToken()">کپی کلید</button>
+      <button type="button" class="btn btn-ghost" onclick="rotateToken()">کلید تازه</button>
+    </div>
+
+    <div class="field-label" style="margin-top:16px;">آدرس ثبت (هم POST، هم باز کردن ساده در مرورگر):</div>
+    <div class="token-row">
+      <input id="api-url" class="field mono" readonly
+             value="{{ api_base }}/api/quick-add?key={{ api_token }}&product=روغن&quantity=2&unit=عدد"
+             style="flex:1; min-width:260px;">
+      <button type="button" class="btn btn-ghost" onclick="copyUrl()">کپی آدرس</button>
+    </div>
+
+    <div class="page-sub" style="margin-top:12px;">
+      پارامترها: <code>product</code> (الزامی) · <code>quantity</code> (پیش‌فرض ۱) ·
+      <code>unit</code> (عدد/کارتن/بسته/گونی/کیلو) · <code>supplier</code> (نام یا شناسه؛ نبود، ساخته می‌شود) ·
+      <code>description</code>
+    </div>
   </div>
 
   <div class="card card-pad">
@@ -118,7 +146,31 @@
         });
     });
 
+    function copyField(id, done) {
+      const el = document.getElementById(id);
+      el.select();
+      el.setSelectionRange(0, 99999);
+      if (navigator.clipboard) navigator.clipboard.writeText(el.value).catch(function () {});
+      else document.execCommand("copy");
+      showSuccess(done);
+    }
 
+    function copyToken() { copyField("api-token", "کلید کپی شد"); }
+    function copyUrl() { copyField("api-url", "آدرس کپی شد"); }
+
+    function rotateToken() {
+      if (!confirm("کلید فعلی از کار می‌افتد و میان‌برهای قبلی باید به‌روز شوند. ادامه؟")) return;
+      App.request("/account/token", { method: "POST" })
+        .then(function (result) {
+          if (!result.ok) { showError("کلید عوض نشد"); return; }
+          const token = result.data.token;
+          const url = document.getElementById("api-url");
+          url.value = url.value.replace(/key=[^&]*/, "key=" + encodeURIComponent(token));
+          document.getElementById("api-token").value = token;
+          showSuccess("کلید تازه ساخته شد");
+        })
+        .catch(function () { showError("خطا در ارتباط با سرور"); });
+    }
   </script>
 
 {% endblock %}
