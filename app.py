@@ -385,12 +385,68 @@ def user_suppliers():
     return g.suppliers
 
 
+def active_clause():
+    """A product counts as «active» when it is not ordered yet.
+
+    Rows written by older versions of the app (or imported straight into the
+    database) can carry ``ordered = NULL`` instead of ``FALSE``. In SQL,
+    ``ordered = FALSE`` skips those rows, which used to make the per-supplier
+    counters show 0 for data registered before. Treat NULL as «not ordered».
+    """
+    return or_(Product.ordered.is_(False), Product.ordered.is_(None))
+
+
+def archived_clause():
+    return Product.ordered.is_(True)
+
+
 def user_products(**filters):
     """Base product query scoped to the logged-in user (supplier eagerly loaded)."""
-    return (
+    ordered = filters.pop("ordered", None)
+    query = (
         Product.query.options(joinedload(Product.supplier))
         .filter_by(owner_id=current_user.id, **filters)
     )
+    if ordered is True:
+        query = query.filter(archived_clause())
+    elif ordered is False:
+        query = query.filter(active_clause())
+    return query
+
+
+def active_counts_by_supplier(supplier_ids=None):
+    """{supplier_id: active product count} for the logged-in user."""
+    query = (
+        db.session.query(Product.supplier_id, db.func.count(Product.id))
+        .filter(Product.owner_id == current_user.id, active_clause())
+    )
+    if supplier_ids is not None:
+        if not supplier_ids:
+            return {}
+        query = query.filter(Product.supplier_id.in_(list(supplier_ids)))
+    return {sid: total for sid, total in query.group_by(Product.supplier_id).all()}
+
+
+def dashboard_counters():
+    """Live numbers shown on the dashboard, always read straight from the DB."""
+    active_count = archived_count = 0
+    for ordered_flag, total in (
+        db.session.query(Product.ordered, db.func.count(Product.id))
+        .filter(Product.owner_id == current_user.id)
+        .group_by(Product.ordered)
+        .all()
+    ):
+        if ordered_flag:
+            archived_count += total
+        else:
+            active_count += total
+
+    return {
+        "active_count": active_count,
+        "archived_count": archived_count,
+        "supplier_count": len(user_suppliers()),
+        "suppliers": active_counts_by_supplier(),
+    }
 
 
 def recent_product_names(limit=150):
@@ -543,6 +599,19 @@ def ensure_schema():
             except Exception:
                 pass
 
+        # Legacy rows can hold NULL instead of FALSE, which silently dropped them
+        # out of every «active order» count. Normalise them once.
+        for statement in (
+            "UPDATE product SET ordered = FALSE WHERE ordered IS NULL",
+            "UPDATE product SET ordered = 0 WHERE ordered IS NULL",
+        ):
+            try:
+                with conn.begin_nested():
+                    conn.execute(text(statement))
+                break
+            except Exception:
+                pass
+
         try:
             conn.execute(
                 text(
@@ -625,28 +694,15 @@ def home():
     """صفحه اول اپلیکیشن: داشبورد"""
     suppliers = user_suppliers()
 
-    active_count = archived_count = 0
-    for ordered_flag, total in (
-        db.session.query(Product.ordered, db.func.count(Product.id))
-        .filter(Product.owner_id == current_user.id)
-        .group_by(Product.ordered)
-        .all()
-    ):
-        if ordered_flag:
-            archived_count += total
-        else:
-            active_count += total
+    counters = dashboard_counters()
+    active_count = counters["active_count"]
+    archived_count = counters["archived_count"]
 
     recent = (
         user_products(ordered=False).order_by(Product.id.desc()).limit(15).all()
     )
 
-    active_by_supplier = dict(
-        db.session.query(Product.supplier_id, db.func.count(Product.id))
-        .filter(Product.owner_id == current_user.id, Product.ordered.is_(False))
-        .group_by(Product.supplier_id)
-        .all()
-    )
+    active_by_supplier = counters["suppliers"]
 
     limits = cached_limits()
 
@@ -972,17 +1028,15 @@ def suppliers():
 def supplier_detail(supplier_id):
     supplier = owned_supplier_or_404(supplier_id)
     active_products = (
-        Product.query.filter_by(
-            owner_id=current_user.id, supplier_id=supplier_id, ordered=False
-        )
+        Product.query.filter_by(owner_id=current_user.id, supplier_id=supplier_id)
+        .filter(active_clause())
         .order_by(Product.id.desc())
         .all()
     )
 
     archived_products = (
-        Product.query.filter_by(
-            owner_id=current_user.id, supplier_id=supplier_id, ordered=True
-        )
+        Product.query.filter_by(owner_id=current_user.id, supplier_id=supplier_id)
+        .filter(archived_clause())
         .order_by(Product.ordered_date.desc().nullslast(), Product.id.desc())
         .all()
     )
@@ -1085,18 +1139,7 @@ def api_search():
         .all()
     )
     supplier_ids = [supplier.id for supplier in matching_suppliers]
-    active_counts = {}
-    if supplier_ids:
-        active_counts = dict(
-            db.session.query(Product.supplier_id, db.func.count(Product.id))
-            .filter(
-                Product.owner_id == current_user.id,
-                Product.ordered.is_(False),
-                Product.supplier_id.in_(supplier_ids),
-            )
-            .group_by(Product.supplier_id)
-            .all()
-        )
+    active_counts = active_counts_by_supplier(supplier_ids)
 
     return {
         "results": [product_payload(item) for item in matches],
@@ -1390,6 +1433,34 @@ def api_suppliers():
     }
 
 
+@app.route("/api/dashboard/stats")
+def api_dashboard_stats():
+    """شمارنده‌های زنده داشبورد (سفارش فعال، آرشیو و تعداد هر تأمین‌کننده).
+
+    داشبورد بعد از باز شدن صفحه و بعد از هر تغییر این را می‌خواند تا عددهای
+    کارت تأمین‌کننده‌ها دقیقاً با دیتابیس یکی باشد؛ حتی برای محصولاتی که
+    قبلاً ثبت شده‌اند.
+    """
+    if not current_user.is_authenticated:
+        return json_error("ابتدا وارد شوید.", 401)
+
+    counters = dashboard_counters()
+    return {
+        "success": True,
+        "active_count": counters["active_count"],
+        "archived_count": counters["archived_count"],
+        "supplier_count": counters["supplier_count"],
+        "suppliers": [
+            {
+                "id": s.id,
+                "name": s.name,
+                "active_count": counters["suppliers"].get(s.id, 0),
+            }
+            for s in user_suppliers()
+        ],
+    }
+
+
 @app.route("/api/license-status")
 def api_license_status():
     """دریافت وضعیت لایسنس کاربر برای UI"""
@@ -1520,8 +1591,8 @@ def regenerate_token():
 def account():
     """Personal account page — only ever shows the logged-in user's own data."""
     supplier_count = Supplier.query.filter_by(owner_id=current_user.id).count()
-    active_count = Product.query.filter_by(owner_id=current_user.id, ordered=False).count()
-    archived_count = Product.query.filter_by(owner_id=current_user.id, ordered=True).count()
+    active_count = Product.query.filter_by(owner_id=current_user.id).filter(active_clause()).count()
+    archived_count = Product.query.filter_by(owner_id=current_user.id).filter(archived_clause()).count()
 
     user = db.session.get(User, current_user.id)
     limits = get_user_limits(user)

@@ -119,6 +119,68 @@ class ListiaTestCase(unittest.TestCase):
             self.assertEqual(prod.supplier_id, s2_id)
             self.assertEqual(prod.product_name, "کالای تستی منتقل شده")
 
+    def test_supplier_card_counters_include_previous_products(self):
+        """کارت تأمین‌کننده باید محصولات قبلی را هم بشمارد، نه فقط ثبت‌های جدید."""
+        self.register_and_login("smq2458", "adminpassword")
+
+        res = self.client.post("/suppliers", data={"name": "تأمین کننده قدیمی"}, headers={"X-Requested-With": "fetch"})
+        s_id = res.get_json()["id"]
+
+        with app.app_context():
+            user = User.query.filter_by(username="smq2458").first()
+            # سه ردیف «قدیمی» مثل داده‌های نسخه‌های قبلی که ordered آن‌ها NULL است
+            for i in range(3):
+                db.session.add(Product(
+                    owner_id=user.id,
+                    supplier_id=s_id,
+                    product_name=f"کالای قدیمی {i}",
+                    quantity="2",
+                    unit="عدد",
+                    ordered=None,
+                ))
+            db.session.commit()
+
+        res = self.client.get("/api/dashboard/stats", headers={"X-Requested-With": "fetch"})
+        self.assertEqual(res.status_code, 200)
+        stats = res.get_json()
+        self.assertTrue(stats["success"])
+        self.assertEqual(stats["active_count"], 3)
+        self.assertEqual(stats["archived_count"], 0)
+        card = next(item for item in stats["suppliers"] if item["id"] == s_id)
+        self.assertEqual(card["active_count"], 3)
+
+        # همان عدد باید در HTML داشبورد هم رندر شود (نه صفر)
+        html = self.client.get("/").get_data(as_text=True)
+        marker = html.split(f'data-supplier-id="{s_id}"', 1)[1]
+        rendered = marker.split('data-count>', 1)[1].split("<", 1)[0]
+        self.assertEqual(rendered.strip(), "3")
+        self.assertIn("کالای قدیمی 0", html)
+
+        # ثبت محصول جدید: شمارنده باید زنده جلو برود (۴ شود)
+        self.client.post("/new-purchase", data={
+            "supplier": str(s_id),
+            "product": "کالای جدید",
+            "quantity": "1",
+            "unit": "عدد",
+            "description": "",
+        }, headers={"X-Requested-With": "fetch"})
+
+        stats = self.client.get("/api/dashboard/stats", headers={"X-Requested-With": "fetch"}).get_json()
+        card = next(item for item in stats["suppliers"] if item["id"] == s_id)
+        self.assertEqual(card["active_count"], 4)
+        self.assertEqual(stats["active_count"], 4)
+
+        # ثبت سفارش یکی از محصولات قدیمی: شمارنده باید کم شود و به آرشیو برود
+        with app.app_context():
+            old_id = Product.query.filter_by(product_name="کالای قدیمی 0").first().id
+        self.client.post(f"/toggle-order/{old_id}", headers={"X-Requested-With": "fetch"})
+
+        stats = self.client.get("/api/dashboard/stats", headers={"X-Requested-With": "fetch"}).get_json()
+        card = next(item for item in stats["suppliers"] if item["id"] == s_id)
+        self.assertEqual(card["active_count"], 3)
+        self.assertEqual(stats["active_count"], 3)
+        self.assertEqual(stats["archived_count"], 1)
+
     def test_smq2458_admin_and_license_generator(self):
         self.register_and_login("smq2458", "adminpassword")
 
