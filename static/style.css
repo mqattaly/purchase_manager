@@ -509,6 +509,8 @@ main.content {
 
 .btn-ghost { background: var(--surface); color: var(--ink); border: 1px solid var(--border); }
 .btn-ghost:hover { background: var(--surface-muted); }
+.btn.danger-text { color: var(--danger); border-color: #F0C9C4; }
+.btn.danger-text:hover { background: var(--danger-bg); }
 
 .icon-btn {
   border: none; background: transparent; cursor: pointer;

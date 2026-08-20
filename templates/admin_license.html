@@ -95,8 +95,8 @@
   <!-- Users list card -->
   <div class="card card-pad">
     <div class="section-head" style="margin-bottom:14px;">
-      <h3 class="account-section-title" style="margin:0;">👥 کاربران ثبت‌شده در سیستم ({{ users|length }})</h3>
-      <span class="page-sub" style="margin:0;">مشاهده وضعیت، تاریخ انقضا و صدور سریع لایسنس</span>
+      <h3 class="account-section-title" style="margin:0;">👥 مدیریت کاربران سیستم (<span id="admin-user-count">{{ users|length }}</span>)</h3>
+      <span class="page-sub" style="margin:0;">ویرایش کاربر، ویرایش یا حذف لایسنس و حذف کامل حساب</span>
     </div>
 
     <div class="table-scroll">
@@ -112,20 +112,28 @@
             <th class="col-actions">عملیات</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody id="admin-users-body">
           {% for u in users %}
-            <tr>
+            <tr data-user-id="{{ u.id }}"
+                data-username="{{ u.username }}"
+                data-user-admin="{{ '1' if u.is_admin else '0' }}"
+                data-user-protected="{{ '1' if u.is_protected else '0' }}"
+                data-user-self="{{ '1' if u.is_self else '0' }}"
+                data-licensed="{{ '1' if u.is_licensed else '0' }}"
+                data-lifetime="{{ '1' if u.is_lifetime else '0' }}"
+                data-expires="{{ u.expires_at_iso }}"
+                data-tier="{{ u.license_type }}">
               <td class="mono muted">#{{ u.id }}</td>
-              <td>
+              <td class="cell-username">
                 <strong>{{ u.username }}</strong>
-                {% if u.username.lower() in ['smq2458', 'admin'] %}
+                {% if u.is_admin %}
                   <span class="tag tag-accent" style="font-size:10px; margin-right:4px;">مدیر</span>
                 {% endif %}
               </td>
-              <td><code class="mono">{{ u.user_code }}</code></td>
+              <td class="cell-user-code"><code class="mono">{{ u.user_code }}</code></td>
               <td class="mono">{{ u.supplier_count }}</td>
               <td class="mono">{{ u.product_count }}</td>
-              <td>
+              <td class="cell-license">
                 {% if u.is_expired %}
                   <span class="tag" style="background:var(--danger-bg); color:var(--danger); border-color:#F0C9C4;">⚠️ منقضی شده</span>
                 {% elif u.is_lifetime %}
@@ -136,15 +144,122 @@
                   <span class="tag tag-accent">آزمایشی (محدود)</span>
                 {% endif %}
               </td>
-              <td class="cell-actions">
-                <button type="button" class="btn btn-ghost btn-sm" onclick="quickGenForUser('{{ u.username }}')" title="تولید لایسنس برای {{ u.username }}">
-                  ⚡ صدور لایسنس
-                </button>
+              <td class="cell-actions" style="white-space:nowrap;">
+                <button type="button" class="btn btn-ghost btn-sm" onclick="quickGenForUser('{{ u.username }}')" title="تولید کلید لایسنس برای {{ u.username }}">⚡ صدور کلید</button>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="openLicenseEditor({{ u.id }})" title="ویرایش یا حذف لایسنس">🎫 لایسنس</button>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="openUserEditor({{ u.id }})" title="ویرایش کاربر">✏️ ویرایش</button>
+                {% if not u.is_protected and not u.is_self %}
+                  <button type="button" class="btn btn-ghost btn-sm danger-text" onclick="deleteUser({{ u.id }})" title="حذف کاربر">🗑 حذف</button>
+                {% endif %}
               </td>
             </tr>
           {% endfor %}
         </tbody>
       </table>
+    </div>
+  </div>
+
+  <!-- ویرایش کاربر -->
+  <div id="user-editor-modal" class="modal-backdrop" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <div class="modal-title-group">
+          <span class="modal-icon">✏️</span>
+          <div>
+            <h2 class="modal-title">ویرایش کاربر</h2>
+            <div class="modal-sub" id="user-editor-sub"></div>
+          </div>
+        </div>
+        <button type="button" class="modal-close" onclick="closeAdminModal('user-editor-modal')" aria-label="بستن">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="field-group">
+          <label class="field-label" for="edit-username">نام کاربری</label>
+          <input id="edit-username" class="field" autocomplete="off">
+          <div class="page-sub" style="margin-top:6px;">
+            کاربران خودشان اجازه تغییر نام کاربری ندارند. با تغییر نام، کلید لایسنس دوباره برای نام جدید صادر می‌شود.
+          </div>
+        </div>
+
+        <div class="field-group" style="margin-top:14px;">
+          <label class="field-label" for="edit-password">رمز عبور جدید (خالی بگذارید تا تغییر نکند)</label>
+          <input id="edit-password" class="field" type="text" autocomplete="off" placeholder="حداقل ۴ کاراکتر">
+        </div>
+
+        <label id="edit-admin-wrap" style="display:flex; align-items:center; gap:8px; margin-top:14px; font-size:13px; font-weight:600; cursor:pointer;">
+          <input id="edit-is-admin" type="checkbox">
+          دسترسی مدیریت (مشاهده پنل مدیر و صدور لایسنس)
+        </label>
+      </div>
+
+      <div class="modal-foot" style="display:flex; justify-content:flex-end; gap:8px;">
+        <button type="button" class="btn btn-ghost" onclick="closeAdminModal('user-editor-modal')">انصراف</button>
+        <button type="button" id="save-user-btn" class="btn btn-accent" onclick="saveUserEdits()">ذخیره تغییرات</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ویرایش لایسنس -->
+  <div id="license-editor-modal" class="modal-backdrop" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <div class="modal-title-group">
+          <span class="modal-icon">🎫</span>
+          <div>
+            <h2 class="modal-title">ویرایش لایسنس کاربر</h2>
+            <div class="modal-sub" id="license-editor-sub"></div>
+          </div>
+        </div>
+        <button type="button" class="modal-close" onclick="closeAdminModal('license-editor-modal')" aria-label="بستن">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="field-row" style="align-items:flex-end; flex-wrap:wrap;">
+          <div style="width:170px;">
+            <label class="field-label" for="edit-duration">مدت اعتبار</label>
+            <select id="edit-duration" class="field" onchange="toggleEditDuration()">
+              <option value="LIFE">🌟 مادام‌العمر (دائمی)</option>
+              <option value="30D">📅 ۱ ماهه (۳۰ روز)</option>
+              <option value="90D">📅 ۳ ماهه (۹۰ روز)</option>
+              <option value="180D">📅 ۶ ماهه (۱۸۰ روز)</option>
+              <option value="365D">📅 ۱ ساله (۳۶۵ روز)</option>
+              <option value="CUSTOM">⚙️ تعداد روز دلخواه</option>
+              <option value="DATE">🗓 تاریخ انقضای مشخص</option>
+            </select>
+          </div>
+
+          <div id="edit-custom-days-wrap" style="width:120px; display:none;">
+            <label class="field-label" for="edit-custom-days">تعداد روز</label>
+            <input id="edit-custom-days" class="field mono" type="number" min="1" value="30">
+          </div>
+
+          <div id="edit-expires-wrap" style="width:170px; display:none;">
+            <label class="field-label" for="edit-expires">تاریخ انقضا (میلادی)</label>
+            <input id="edit-expires" class="field mono" type="date">
+          </div>
+
+          <div style="width:150px;">
+            <label class="field-label" for="edit-tier">پلن لایسنس</label>
+            <select id="edit-tier" class="field">
+              <option value="PRO">پرو (نامحدود)</option>
+              <option value="UNLIMITED">سازمانی (نامحدود)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="page-sub" style="margin-top:12px;">
+          وضعیت فعلی: <strong id="license-editor-status"></strong>
+        </div>
+      </div>
+
+      <div class="modal-foot" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
+        <button type="button" id="revoke-license-btn" class="btn btn-ghost danger-text" onclick="revokeLicense()">🗑 حذف لایسنس</button>
+        <div style="display:flex; gap:8px;">
+          <button type="button" class="btn btn-ghost" onclick="closeAdminModal('license-editor-modal')">انصراف</button>
+          <button type="button" id="save-license-btn" class="btn btn-accent" onclick="saveLicenseEdits()">ذخیره لایسنس</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -249,6 +364,237 @@
       else document.execCommand("copy");
       showSuccess("متن پیام مشتری کپی شد");
     }
+
+    /* ================= مدیریت کاربران و لایسنس‌ها (فقط مدیر) ================= */
+
+    let editingUserId = null;
+
+    function userRow(id) {
+      return document.querySelector('#admin-users-body tr[data-user-id="' + id + '"]');
+    }
+
+    function openAdminModal(id) {
+      const modal = document.getElementById(id);
+      if (modal) modal.hidden = false;
+    }
+
+    function closeAdminModal(id) {
+      const modal = document.getElementById(id);
+      if (modal) modal.hidden = true;
+    }
+
+    function openUserEditor(id) {
+      const row = userRow(id);
+      if (!row) return;
+      editingUserId = id;
+      document.getElementById("user-editor-sub").textContent = "حساب «" + row.dataset.username + "» (شناسه #" + id + ")";
+      document.getElementById("edit-username").value = row.dataset.username || "";
+      document.getElementById("edit-password").value = "";
+
+      const adminBox = document.getElementById("edit-is-admin");
+      adminBox.checked = row.dataset.userAdmin === "1";
+      // مدیر اصلی و حساب خود شما نباید دسترسی مدیریتش برداشته شود
+      const locked = row.dataset.userProtected === "1" || row.dataset.userSelf === "1";
+      adminBox.disabled = locked;
+      document.getElementById("edit-admin-wrap").style.opacity = locked ? "0.55" : "1";
+
+      openAdminModal("user-editor-modal");
+      document.getElementById("edit-username").focus();
+    }
+
+    function saveUserEdits() {
+      if (!editingUserId) return;
+      const btn = document.getElementById("save-user-btn");
+      const username = document.getElementById("edit-username").value.trim();
+      const password = document.getElementById("edit-password").value;
+      const adminBox = document.getElementById("edit-is-admin");
+
+      if (!username) {
+        showError("نام کاربری را وارد کنید.");
+        return;
+      }
+
+      const form = { username: username, new_password: password };
+      if (!adminBox.disabled) form.is_admin = adminBox.checked ? "1" : "0";
+
+      btn.disabled = true;
+      App.request("/api/admin/users/" + editingUserId + "/update", { form: form })
+        .then(function (res) {
+          btn.disabled = false;
+          if (!res.ok) {
+            showError((res.data && res.data.message) || "ذخیره نشد");
+            return;
+          }
+          paintUserRow(res.data.user);
+          closeAdminModal("user-editor-modal");
+          showSuccess(res.data.message || "کاربر به‌روزرسانی شد");
+        })
+        .catch(function () {
+          btn.disabled = false;
+          showError("خطا در ارتباط با سرور");
+        });
+    }
+
+    function openLicenseEditor(id) {
+      const row = userRow(id);
+      if (!row) return;
+      editingUserId = id;
+      document.getElementById("license-editor-sub").textContent = "حساب «" + row.dataset.username + "» (شناسه #" + id + ")";
+      document.getElementById("edit-tier").value = (row.dataset.tier || "PRO").toUpperCase() === "UNLIMITED" ? "UNLIMITED" : "PRO";
+
+      const duration = document.getElementById("edit-duration");
+      const expires = row.dataset.expires || "";
+      duration.value = expires ? "DATE" : "LIFE";
+      document.getElementById("edit-expires").value = expires;
+      toggleEditDuration();
+
+      const statusCell = row.querySelector(".cell-license");
+      document.getElementById("license-editor-status").textContent =
+        statusCell ? statusCell.textContent.trim() : "";
+
+      const revokeBtn = document.getElementById("revoke-license-btn");
+      revokeBtn.style.display = row.dataset.userProtected === "1" ? "none" : "";
+      revokeBtn.disabled = row.dataset.licensed !== "1";
+
+      openAdminModal("license-editor-modal");
+    }
+
+    function toggleEditDuration() {
+      const value = document.getElementById("edit-duration").value;
+      document.getElementById("edit-custom-days-wrap").style.display = value === "CUSTOM" ? "block" : "none";
+      document.getElementById("edit-expires-wrap").style.display = value === "DATE" ? "block" : "none";
+    }
+
+    function saveLicenseEdits() {
+      if (!editingUserId) return;
+      const btn = document.getElementById("save-license-btn");
+      const mode = document.getElementById("edit-duration").value;
+      const form = { action: "grant", tier: document.getElementById("edit-tier").value };
+
+      if (mode === "DATE") {
+        const expires = document.getElementById("edit-expires").value;
+        if (!expires) {
+          showError("تاریخ انقضا را انتخاب کنید.");
+          return;
+        }
+        form.expires_at = expires;
+      } else if (mode === "CUSTOM") {
+        const days = document.getElementById("edit-custom-days").value.trim();
+        if (!days || Number(days) <= 0) {
+          showError("تعداد روز معتبر وارد کنید.");
+          return;
+        }
+        form.duration = days + "D";
+      } else {
+        form.duration = mode;
+      }
+
+      btn.disabled = true;
+      App.request("/api/admin/users/" + editingUserId + "/license", { form: form })
+        .then(function (res) {
+          btn.disabled = false;
+          if (!res.ok) {
+            showError((res.data && res.data.message) || "ذخیره لایسنس انجام نشد");
+            return;
+          }
+          paintUserRow(res.data.user);
+          closeAdminModal("license-editor-modal");
+          showSuccess(res.data.message || "لایسنس به‌روزرسانی شد");
+        })
+        .catch(function () {
+          btn.disabled = false;
+          showError("خطا در ارتباط با سرور");
+        });
+    }
+
+    function revokeLicense() {
+      if (!editingUserId) return;
+      const row = userRow(editingUserId);
+      const name = row ? row.dataset.username : "";
+      if (!confirm("لایسنس «" + name + "» حذف شود و حساب به نسخه آزمایشی برگردد؟")) return;
+
+      const btn = document.getElementById("revoke-license-btn");
+      btn.disabled = true;
+      App.request("/api/admin/users/" + editingUserId + "/license", { form: { action: "revoke" } })
+        .then(function (res) {
+          btn.disabled = false;
+          if (!res.ok) {
+            showError((res.data && res.data.message) || "حذف لایسنس انجام نشد");
+            return;
+          }
+          paintUserRow(res.data.user);
+          closeAdminModal("license-editor-modal");
+          showSuccess(res.data.message || "لایسنس حذف شد");
+        })
+        .catch(function () {
+          btn.disabled = false;
+          showError("خطا در ارتباط با سرور");
+        });
+    }
+
+    function deleteUser(id) {
+      const row = userRow(id);
+      if (!row) return;
+      const name = row.dataset.username;
+      if (!confirm("کاربر «" + name + "» با همه تأمین‌کننده‌ها و محصولاتش برای همیشه حذف شود؟")) return;
+
+      App.request("/api/admin/users/" + id + "/delete", { form: {} })
+        .then(function (res) {
+          if (!res.ok) {
+            showError((res.data && res.data.message) || "حذف انجام نشد");
+            return;
+          }
+          row.remove();
+          const counter = document.getElementById("admin-user-count");
+          if (counter) counter.textContent = document.querySelectorAll("#admin-users-body tr").length;
+          showSuccess(res.data.message || "کاربر حذف شد");
+        })
+        .catch(function () { showError("خطا در ارتباط با سرور"); });
+    }
+
+    function licenseStatusHtml(user) {
+      if (user.is_expired) {
+        return '<span class="tag" style="background:var(--danger-bg); color:var(--danger); border-color:#F0C9C4;">⚠️ منقضی شده</span>';
+      }
+      if (user.is_lifetime) return '<span class="tag tag-success">✓ مادام‌العمر</span>';
+      if (user.is_licensed) {
+        return '<span class="tag tag-success">✓ فعال (' + user.remaining_days + " روز مانده تا " + user.expires_at_label + ")</span>";
+      }
+      return '<span class="tag tag-accent">آزمایشی (محدود)</span>';
+    }
+
+    function paintUserRow(user) {
+      const row = userRow(user.id);
+      if (!row) return;
+      row.dataset.username = user.username;
+      row.dataset.userAdmin = user.is_admin ? "1" : "0";
+      row.dataset.userProtected = user.is_protected ? "1" : "0";
+      row.dataset.licensed = user.is_licensed ? "1" : "0";
+      row.dataset.lifetime = user.is_lifetime ? "1" : "0";
+      row.dataset.expires = user.expires_at_iso || "";
+      row.dataset.tier = user.license_type || "free";
+
+      row.querySelector(".cell-username").innerHTML =
+        "<strong>" + escapeHtml(user.username) + "</strong>" +
+        (user.is_admin ? ' <span class="tag tag-accent" style="font-size:10px; margin-right:4px;">مدیر</span>' : "");
+      row.querySelector(".cell-user-code").innerHTML = '<code class="mono">' + escapeHtml(user.user_code) + "</code>";
+      row.querySelector(".cell-license").innerHTML = licenseStatusHtml(user);
+    }
+
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape") return;
+      closeAdminModal("user-editor-modal");
+      closeAdminModal("license-editor-modal");
+    });
+
+    ["user-editor-modal", "license-editor-modal"].forEach(function (id) {
+      const modal = document.getElementById(id);
+      if (modal) {
+        modal.addEventListener("click", function (e) {
+          if (e.target === modal) closeAdminModal(id);
+        });
+      }
+    });
   </script>
 
 {% endblock %}

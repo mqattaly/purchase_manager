@@ -2,6 +2,7 @@ import io
 import unittest
 from datetime import datetime, timedelta
 import pandas as pd
+from werkzeug.security import check_password_hash
 from app import app, db, User, Supplier, Product, get_user_limits, issue_api_token, is_admin_user
 from licensing import get_user_code, generate_key, generate_master_key, verify_key
 
@@ -216,6 +217,87 @@ class ListiaTestCase(unittest.TestCase):
         # هر گروه یک ردیف شروع دارد
         rows_html = body.split("</table>", 1)[0]
         self.assertEqual(rows_html.count('class="supplier-group-start"'), 2)
+
+    def test_admin_can_manage_users_and_licenses(self):
+        """مدیر می‌تواند کاربر و لایسنس را ویرایش و حذف کند؛ کاربر عادی نه."""
+        # یک کاربر عادی می‌سازیم
+        self.register_and_login("mohammad", "123456")
+        with app.app_context():
+            target_id = User.query.filter_by(username="mohammad").first().id
+        # کاربر عادی نباید به عملیات مدیریتی دسترسی داشته باشد
+        res = self.client.post(f"/api/admin/users/{target_id}/update",
+                               data={"username": "hacker"}, headers={"X-Requested-With": "fetch"})
+        self.assertEqual(res.status_code, 403)
+        # کاربر عادی نباید بتواند نام کاربری خودش را عوض کند
+        res = self.client.post("/account/username",
+                               data={"username": "newname", "current_password": "123456"},
+                               headers={"X-Requested-With": "fetch"})
+        self.assertEqual(res.status_code, 403)
+        with app.app_context():
+            self.assertIsNotNone(User.query.filter_by(username="mohammad").first())
+
+        # حالا با حساب مدیر
+        self.client.get("/logout")
+        self.register_and_login("smq2458", "adminpassword")
+
+        # ۱) ویرایش کاربر: نام کاربری و رمز عبور
+        res = self.client.post(f"/api/admin/users/{target_id}/update",
+                               data={"username": "mohammad-new", "new_password": "9876"},
+                               headers={"X-Requested-With": "fetch"})
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.get_json()["success"])
+        with app.app_context():
+            target = db.session.get(User, target_id)
+            self.assertEqual(target.username, "mohammad-new")
+            self.assertTrue(check_password_hash(target.password_hash, "9876"))
+
+        # ۲) ویرایش لایسنس: ۶۰ روزه
+        res = self.client.post(f"/api/admin/users/{target_id}/license",
+                               data={"action": "grant", "tier": "PRO", "duration": "60D"},
+                               headers={"X-Requested-With": "fetch"})
+        self.assertEqual(res.status_code, 200)
+        payload = res.get_json()
+        self.assertTrue(payload["user"]["is_licensed"])
+        self.assertFalse(payload["user"]["is_lifetime"])
+        with app.app_context():
+            target = db.session.get(User, target_id)
+            self.assertTrue(target.is_licensed)
+            self.assertIsNotNone(target.license_expires_at)
+            # کلید ذخیره‌شده باید برای نام کاربری جدید معتبر باشد
+            valid, _, _, _ = verify_key(target, target.license_key)
+            self.assertTrue(valid)
+
+        # ۳) حذف لایسنس
+        res = self.client.post(f"/api/admin/users/{target_id}/license",
+                               data={"action": "revoke"}, headers={"X-Requested-With": "fetch"})
+        self.assertEqual(res.status_code, 200)
+        with app.app_context():
+            target = db.session.get(User, target_id)
+            self.assertFalse(target.is_licensed)
+            self.assertIsNone(target.license_key)
+            self.assertEqual(target.license_type, "free")
+
+        # ۴) حساب مدیر و حساب خود کاربر جاری قابل حذف نیست
+        with app.app_context():
+            admin_id = User.query.filter_by(username="smq2458").first().id
+        res = self.client.post(f"/api/admin/users/{admin_id}/delete", headers={"X-Requested-With": "fetch"})
+        self.assertEqual(res.status_code, 400)
+
+        # ۵) حذف کامل کاربر به همراه داده‌هایش
+        with app.app_context():
+            supplier = Supplier(name="تأمین کننده کاربر", owner_id=target_id)
+            db.session.add(supplier)
+            db.session.commit()
+            db.session.add(Product(owner_id=target_id, supplier_id=supplier.id,
+                                   product_name="کالای کاربر", quantity="1", unit="عدد"))
+            db.session.commit()
+
+        res = self.client.post(f"/api/admin/users/{target_id}/delete", headers={"X-Requested-With": "fetch"})
+        self.assertEqual(res.status_code, 200)
+        with app.app_context():
+            self.assertIsNone(db.session.get(User, target_id))
+            self.assertEqual(Supplier.query.filter_by(owner_id=target_id).count(), 0)
+            self.assertEqual(Product.query.filter_by(owner_id=target_id).count(), 0)
 
     def test_smq2458_admin_and_license_generator(self):
         self.register_and_login("smq2458", "adminpassword")

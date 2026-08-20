@@ -1542,31 +1542,199 @@ def activate_license():
 #  پنل ادمین: تولید لایسنس داخل وب‌اپلیکیشن (مخصوص س.م.قتالی smq2458)
 # ---------------------------------------------------------------------------
 
+def admin_user_payload(user):
+    """اطلاعات یک کاربر برای جدول مدیریت (پنل مدیر)."""
+    user_limits = get_user_limits(user)
+    return {
+        "id": user.id,
+        "username": user.username,
+        "user_code": user_limits["user_code"],
+        "is_licensed": user_limits["is_licensed"],
+        "is_expired": user_limits["is_expired"],
+        "is_lifetime": user_limits["is_lifetime"],
+        "remaining_days": user_limits["remaining_days"],
+        "expires_at_label": user_limits["expires_at_label"],
+        "expires_at_iso": user.license_expires_at.date().isoformat() if user.license_expires_at else "",
+        "supplier_count": user_limits["supplier_count"],
+        "product_count": user_limits["product_count"],
+        "license_type": user.license_type or "free",
+        "license_key": user.license_key or "",
+        "is_admin": bool(is_admin_user(user)),
+        "is_protected": bool(user.username and user.username.lower() in ADMIN_USERNAMES),
+        "is_self": bool(current_user.is_authenticated and user.id == current_user.id),
+    }
+
+
+def admin_target_user(user_id):
+    """(user, error) — کاربر هدف عملیات مدیریتی."""
+    if not is_admin_user(current_user):
+        return None, json_error("دسترسی به این بخش فقط برای مدیر نرم‌افزار مجاز است.", 403)
+    user = db.session.get(User, user_id)
+    if not user:
+        return None, json_error("کاربر پیدا نشد.", 404)
+    return user, None
+
+
+def refresh_license_key(user):
+    """کلید ذخیره‌شده را با نام کاربری فعلی هم‌خوان می‌کند (کلیدها به نام کاربر گره خورده‌اند)."""
+    if not user.is_licensed:
+        return None
+    if user.license_expires_at:
+        days = max(1, (user.license_expires_at - datetime.now()).days + 1)
+        period_code, _, _ = normalize_duration(str(days))
+    else:
+        period_code = "LIFE"
+    user.license_key = generate_key(user.username, user.license_type or "PRO", period_code)
+    return user.license_key
+
+
 @app.route("/admin/license-generator")
 def admin_license_generator():
     if not is_admin_user(current_user):
         return json_error("دسترسی به این بخش فقط برای مدیر نرم‌افزار مجاز است.", 403)
 
     all_users = User.query.order_by(User.id.desc()).all()
-    user_list = []
-    for u in all_users:
-        user_limits = get_user_limits(u)
-        user_list.append({
-            "id": u.id,
-            "username": u.username,
-            "user_code": user_limits["user_code"],
-            "is_licensed": user_limits["is_licensed"],
-            "is_expired": user_limits["is_expired"],
-            "is_lifetime": user_limits["is_lifetime"],
-            "remaining_days": user_limits["remaining_days"],
-            "expires_at_label": user_limits["expires_at_label"],
-            "supplier_count": user_limits["supplier_count"],
-            "product_count": user_limits["product_count"],
-            "license_type": u.license_type,
-            "license_key": u.license_key,
-        })
+    return render_template("admin_license.html", users=[admin_user_payload(u) for u in all_users])
 
-    return render_template("admin_license.html", users=user_list)
+
+@app.route("/api/admin/users/<int:user_id>/update", methods=["POST"])
+def api_admin_update_user(user_id):
+    """ویرایش کاربر توسط مدیر: نام کاربری، رمز عبور و دسترسی مدیریت."""
+    user, error = admin_target_user(user_id)
+    if error:
+        return error
+
+    username = request.form.get("username", "").strip()[:100]
+    new_password = request.form.get("new_password", "")
+    admin_flag = request.form.get("is_admin")
+
+    changes = []
+
+    if username and username != user.username:
+        if len(username) < 2:
+            return json_error("نام کاربری خیلی کوتاه است.")
+        exists = User.query.filter(
+            db.func.lower(User.username) == username.lower(), User.id != user.id
+        ).first()
+        if exists:
+            return json_error("این نام کاربری قبلاً وجود دارد.")
+        old_username = user.username
+        user.username = username
+        # کلید لایسنس به نام کاربری گره خورده؛ با تغییر نام، کلید تازه صادر می‌شود.
+        refresh_license_key(user)
+        changes.append(f"نام کاربری از «{old_username}» به «{username}» تغییر کرد")
+
+    if new_password:
+        if len(new_password) < 4:
+            return json_error("رمز عبور جدید حداقل ۴ کاراکتر باشد.")
+        user.password_hash = generate_password_hash(new_password)
+        changes.append("رمز عبور بازنشانی شد")
+
+    if admin_flag is not None:
+        wants_admin = admin_flag in ("1", "true", "on")
+        if not wants_admin and user.id == current_user.id:
+            return json_error("دسترسی مدیریت حساب خودتان را نمی‌توانید بردارید.")
+        if not wants_admin and user.username.lower() in ADMIN_USERNAMES:
+            return json_error("این حساب مدیر اصلی سامانه است و قابل تغییر نیست.")
+        if bool(user.is_admin) != wants_admin:
+            user.is_admin = wants_admin
+            if wants_admin:
+                user.is_licensed = True
+            changes.append("دسترسی مدیریت " + ("داده شد" if wants_admin else "برداشته شد"))
+
+    if not changes:
+        return json_error("تغییری برای ذخیره وجود ندارد.")
+
+    db.session.commit()
+    return {
+        "success": True,
+        "message": "✓ " + "، ".join(changes),
+        "user": admin_user_payload(user),
+    }
+
+
+@app.route("/api/admin/users/<int:user_id>/license", methods=["POST"])
+def api_admin_update_license(user_id):
+    """ویرایش یا حذف لایسنس یک کاربر توسط مدیر."""
+    user, error = admin_target_user(user_id)
+    if error:
+        return error
+
+    action = request.form.get("action", "grant").strip().lower()
+
+    if action in ("revoke", "delete", "remove"):
+        if user.username.lower() in ADMIN_USERNAMES:
+            return json_error("لایسنس حساب مدیر اصلی قابل حذف نیست.")
+        user.is_licensed = False
+        user.license_key = None
+        user.licensed_at = None
+        user.license_expires_at = None
+        user.license_type = "free"
+        if user.id != current_user.id:
+            user.is_admin = bool(user.is_admin and user.username.lower() in ADMIN_USERNAMES)
+        db.session.commit()
+        return {
+            "success": True,
+            "message": f"لایسنس «{user.username}» حذف شد و حساب به نسخه آزمایشی برگشت.",
+            "user": admin_user_payload(user),
+        }
+
+    tier = request.form.get("tier", "PRO").strip().upper() or "PRO"
+    duration = request.form.get("duration", "LIFE").strip()
+    expires_at_raw = request.form.get("expires_at", "").strip()
+
+    if duration.upper() == "CUSTOM":
+        duration = request.form.get("custom_days", "").strip() or "LIFE"
+
+    if expires_at_raw:
+        try:
+            target = date.fromisoformat(expires_at_raw)
+        except ValueError:
+            return json_error("تاریخ انقضا معتبر نیست.")
+        days = (target - date.today()).days
+        if days <= 0:
+            return json_error("تاریخ انقضا باید بعد از امروز باشد.")
+        period_code, days, duration_label = normalize_duration(str(days))
+        expires_at = datetime.combine(target, datetime.min.time()).replace(hour=23, minute=59)
+    else:
+        period_code, days, duration_label = normalize_duration(duration)
+        expires_at = datetime.now() + timedelta(days=days) if days else None
+
+    user.is_licensed = True
+    user.license_type = tier
+    user.licensed_at = user.licensed_at or datetime.now()
+    user.license_expires_at = expires_at
+    user.license_key = generate_key(user.username, tier, period_code)
+    db.session.commit()
+
+    validity = "مادام‌العمر (دائمی)" if expires_at is None else f"تا {shamsi_label(expires_at.date())}"
+    return {
+        "success": True,
+        "message": f"لایسنس «{user.username}» به‌روزرسانی شد — {duration_label} ({validity}).",
+        "license_key": user.license_key,
+        "user": admin_user_payload(user),
+    }
+
+
+@app.route("/api/admin/users/<int:user_id>/delete", methods=["POST"])
+def api_admin_delete_user(user_id):
+    """حذف کامل یک کاربر همراه با تأمین‌کننده‌ها و محصولاتش."""
+    user, error = admin_target_user(user_id)
+    if error:
+        return error
+
+    if user.id == current_user.id:
+        return json_error("حساب خودتان را نمی‌توانید حذف کنید.")
+    if user.username.lower() in ADMIN_USERNAMES:
+        return json_error("حساب مدیر اصلی سامانه قابل حذف نیست.")
+
+    username = user.username
+    Product.query.filter_by(owner_id=user.id).delete(synchronize_session=False)
+    Supplier.query.filter_by(owner_id=user.id).delete(synchronize_session=False)
+    db.session.delete(user)
+    db.session.commit()
+
+    return {"success": True, "message": f"کاربر «{username}» و همه داده‌هایش حذف شد.", "id": user_id}
 
 
 @app.route("/api/admin/generate-license", methods=["POST"])
@@ -1644,25 +1812,11 @@ def account():
 
 @app.route("/account/username", methods=["POST"])
 def change_username():
-    new_username = request.form.get("username", "").strip()
-    password = request.form.get("current_password", "")
-
-    user = db.session.get(User, current_user.id)
-
-    if not new_username:
-        return json_error("نام کاربری را وارد کنید.")
-    if len(new_username) < 2:
-        return json_error("نام کاربری خیلی کوتاه است.")
-    if not check_password_hash(user.password_hash, password):
-        return json_error("رمز عبور فعلی درست نیست.")
-    if new_username == user.username:
-        return json_error("این همان نام کاربری فعلی است.")
-    if User.query.filter(User.username == new_username, User.id != user.id).first():
-        return json_error("این نام کاربری قبلاً وجود دارد.")
-
-    user.username = new_username
-    db.session.commit()
-    return {"success": True, "username": user.username}
+    """تغییر نام کاربری فقط از پنل مدیر انجام می‌شود."""
+    return json_error(
+        "تغییر نام کاربری فقط توسط مدیر سامانه انجام می‌شود. لطفاً با پشتیبانی تماس بگیرید.",
+        403,
+    )
 
 
 @app.route("/account/password", methods=["POST"])
