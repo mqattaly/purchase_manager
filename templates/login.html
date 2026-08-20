@@ -87,9 +87,11 @@
 <body>
   <script>
     (function () {
+      if (sessionStorage.getItem("listia_auth_fail")) return;
       var token = null;
       try { token = localStorage.getItem("listia_auth"); } catch (e) {}
       if (!token) return;
+      sessionStorage.setItem("listia_auth_fail", "1");
       location.replace("/?auth=" + encodeURIComponent(token));
     })();
   </script>

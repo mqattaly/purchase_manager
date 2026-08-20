@@ -15,6 +15,7 @@
     (function () {
       var token = {{ token|tojson }};
       try { localStorage.setItem("listia_auth", token); } catch (e) {}
+      try { sessionStorage.removeItem("listia_auth_fail"); } catch (e) {}
       location.replace("/?auth=" + encodeURIComponent(token));
     })();
   </script>
