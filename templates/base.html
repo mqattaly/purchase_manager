@@ -5,8 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#142430">
   <title>{% block title %}لیستیا{% endblock %}</title>
-  <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}?v={{ asset_v }}">
-  <link rel="apple-touch-icon" href="{{ url_for('static', filename='logo.png') }}?v={{ asset_v }}">
+  <link rel="icon" type="image/x-icon" href="/favicon.ico?v={{ asset_v }}">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v={{ asset_v }}">
+  <link rel="icon" type="image/png" sizes="192x192" href="/logo-192.png?v={{ asset_v }}">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v={{ asset_v }}">
+  <link rel="manifest" href="/manifest.webmanifest?v={{ asset_v }}">
+  <meta name="apple-mobile-web-app-title" content="لیستیا">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -53,7 +59,8 @@
 
     <aside class="sidebar">
       <div class="brand">
-        <img class="brand-logo" src="{{ url_for('static', filename='logo.png') }}?v={{ asset_v }}" alt="لیستیا" width="38" height="38">
+        <img class="brand-logo" src="/logo-192.png?v={{ asset_v }}" alt="لیستیا" width="38" height="38"
+             onerror="this.onerror=null; this.src='{{ url_for('static', filename='logo.png') }}?v={{ asset_v }}';">
         <div class="brand-text">
           <span class="brand-title">لیستیا</span>
           <span class="brand-sub">مدیریت سفارش و خرید</span>

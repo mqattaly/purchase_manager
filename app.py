@@ -657,15 +657,37 @@ def ensure_schema():
         db.session.commit()
 
 
+BRAND_FILES = (
+    "style.css",
+    "app.js",
+    "logo.png",
+    "logo-192.png",
+    "logo-512.png",
+    "favicon.png",
+    "favicon-32.png",
+    "favicon.ico",
+    "apple-touch-icon.png",
+)
+
+
 def _asset_version():
-    """Cache-busting stamp so browsers can cache CSS/JS for a year."""
+    """Cache-busting stamp so browsers can cache CSS/JS/آیکون‌ها for a year.
+
+    اندازه فایل‌ها هم در امضا می‌آید تا اگر لوگو یا فاوآیکون عوض شود — حتی
+    وقتی تاریخ فایل‌ها روی سرور یکسان است (مثل دیپلوی‌های Vercel) — مرورگر
+    نسخه تازه را بگیرد و نسخه کش‌شده قدیمی را نشان ندهد.
+    """
     stamp = 0
-    for name in ("style.css", "app.js"):
+    total_size = 0
+    for name in BRAND_FILES:
+        path = os.path.join(BASE_DIR, "static", name)
         try:
-            stamp = max(stamp, int(os.path.getmtime(os.path.join(BASE_DIR, "static", name))))
+            stat = os.stat(path)
         except OSError:
-            pass
-    return str(stamp)
+            continue
+        stamp = max(stamp, int(stat.st_mtime))
+        total_size += stat.st_size
+    return f"{stamp}-{total_size}"
 
 
 ASSET_VERSION = _asset_version()
@@ -704,11 +726,83 @@ def _prepare_request():
         if user:
             login_user(user, remember=True)
 
-    allowed = {"login", "signup", "static", "api_quick_add", "api_suppliers"}
+    allowed = {
+        "login",
+        "signup",
+        "static",
+        "api_quick_add",
+        "api_suppliers",
+        "brand_asset",
+        "web_manifest",
+    }
     if request.endpoint in allowed or request.endpoint is None:
         return
     if not current_user.is_authenticated:
         return redirect(url_for("login"))
+
+
+# ---------------------------------------------------------------------------
+#  لوگو و آیکون‌ها — فایل‌ها در پوشه static می‌مانند، ولی از ریشه هم سرو می‌شوند
+#  تا حتی اگر هاست مسیر /static را جای دیگری بفرستد، آیکون‌ها نمایش داده شوند.
+# ---------------------------------------------------------------------------
+
+BRAND_ROUTE_FILES = {
+    "favicon.ico": "image/x-icon",
+    "favicon.png": "image/png",
+    "favicon-32.png": "image/png",
+    "favicon-16.png": "image/png",
+    "apple-touch-icon.png": "image/png",
+    "apple-touch-icon-precomposed.png": "image/png",
+    "logo.png": "image/png",
+    "logo-192.png": "image/png",
+    "logo-512.png": "image/png",
+}
+
+
+@app.route("/favicon.ico")
+@app.route("/favicon.png")
+@app.route("/favicon-32.png")
+@app.route("/favicon-16.png")
+@app.route("/apple-touch-icon.png")
+@app.route("/apple-touch-icon-precomposed.png")
+@app.route("/logo.png")
+@app.route("/logo-192.png")
+@app.route("/logo-512.png")
+def brand_asset():
+    filename = os.path.basename(request.path)
+    mimetype = BRAND_ROUTE_FILES.get(filename, "image/png")
+    path = os.path.join(BASE_DIR, "static", filename)
+    if not os.path.exists(path):
+        fallback = "logo.png" if filename.startswith(("logo", "apple")) else "favicon.png"
+        path = os.path.join(BASE_DIR, "static", fallback)
+        if not os.path.exists(path):
+            return json_error("فایل آیکون پیدا نشد.", 404)
+        mimetype = "image/png"
+    return send_file(path, mimetype=mimetype, max_age=60 * 60 * 24 * 7)
+
+
+@app.route("/manifest.webmanifest")
+def web_manifest():
+    """معرفی اپ برای نصب روی موبایل (Add to Home Screen) با لوگوی خودمان."""
+    response = make_response({
+        "name": "لیستیا — مدیریت سفارش و خرید",
+        "short_name": "لیستیا",
+        "description": "سامانه مدیریت هوشمند خرید و سفارش‌های فروشگاه",
+        "start_url": "/",
+        "scope": "/",
+        "display": "standalone",
+        "dir": "rtl",
+        "lang": "fa",
+        "background_color": "#F3F6F8",
+        "theme_color": "#142430",
+        "icons": [
+            {"src": f"/logo-192.png?v={ASSET_VERSION}", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+            {"src": f"/logo-512.png?v={ASSET_VERSION}", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+            {"src": f"/logo-512.png?v={ASSET_VERSION}", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+        ],
+    })
+    response.headers["Content-Type"] = "application/manifest+json; charset=utf-8"
+    return response
 
 
 @app.route("/")
