@@ -38,8 +38,8 @@
         <thead>
           <tr>
             <th class="col-order">سفارش</th>
-            <th>تأمین‌کننده</th>
             <th>نام محصول</th>
+            <th>تأمین‌کننده</th>
             <th>تعداد</th>
             <th>نوع تعداد</th>
             <th>توضیحات</th>
@@ -55,25 +55,25 @@
                 data-product-name="{{ item.product_name }}"
                 data-quantity="{{ item.quantity }}"
                 data-unit="{{ item.unit }}"
-                data-description="{{ item.description or '' }}">
-              <td class="cell-order">
+                data-description="{{ item.description or '' }}"
+                class="row-link"
+                onclick="handleDashRowClick(event, {{ item.supplier_id }}, {{ item.id }})">
+              <td class="cell-order" onclick="event.stopPropagation()">
                 <button type="button" class="order-check" title="ثبت سفارش" aria-label="ثبت سفارش" aria-pressed="false" onclick="toggleDashOrder({{ item.id }})">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
                 </button>
               </td>
-              <td class="cell-supplier">
-                <a href="/supplier/{{ item.supplier_id }}" style="font-weight:600; text-decoration:none;">{{ item.supplier.name }}</a>
-              </td>
               <td class="cell-product"><strong>{{ item.product_name }}</strong></td>
+              <td class="cell-supplier muted">{{ item.supplier.name }}</td>
               <td class="mono cell-quantity">{{ item.quantity }}</td>
               <td class="cell-unit"><span class="tag">{{ item.unit }}</span></td>
               <td class="cell-description muted">{{ item.description or '' }}</td>
-              <td>
+              <td class="cell-actions" onclick="event.stopPropagation()">
                 <button type="button" class="icon-btn" title="ویرایش" onclick="startDashEdit({{ item.id }})">
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
                 </button>
               </td>
-              <td>
+              <td class="cell-actions" onclick="event.stopPropagation()">
                 <button type="button" class="icon-btn danger" title="حذف" onclick="deleteDashProduct({{ item.id }})">
                   <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>
                 </button>
@@ -97,6 +97,13 @@
       {% endfor %}
     ];
     const DASH_UNITS = ["عدد", "کارتن", "بسته", "گونی", "کیلو"];
+
+    function handleDashRowClick(event, supplierId, productId) {
+      if (event.target.closest("button") || event.target.closest("input") || event.target.closest("select") || event.target.closest(".editing")) {
+        return;
+      }
+      window.location.href = '/supplier/' + supplierId + '?highlight=' + productId;
+    }
 
     function updateDashEmpty() {
       const remaining = document.querySelectorAll("#dash-recent-body tr").length;
@@ -148,6 +155,8 @@
       const description = row.dataset.description || "";
       const currentSupplierId = String(row.dataset.supplierId || "");
 
+      row.querySelector(".cell-product").innerHTML = '<input class="field" style="height:34px; width:140px;" value="' + escapeAttr(product) + '">';
+
       row.querySelector(".cell-supplier").innerHTML =
         '<select class="field" style="height:34px; width:130px;">' +
         DASH_SUPPLIERS.map(function (s) {
@@ -155,7 +164,6 @@
         }).join("") +
         '</select>';
 
-      row.querySelector(".cell-product").innerHTML = '<input class="field" style="height:34px; width:140px;" value="' + escapeAttr(product) + '">';
       row.querySelector(".cell-quantity").innerHTML = '<input class="field mono" style="height:34px; width:70px;" type="number" value="' + escapeAttr(quantity) + '">';
       row.querySelector(".cell-unit").innerHTML =
         '<select class="field" style="height:34px; width:90px;">' +
@@ -226,16 +234,17 @@
     }
 
     function paintDashRow(row, item) {
+      row.setAttribute("onclick", "handleDashRowClick(event, " + item.supplier_id + ", " + row.dataset.id + ")");
       row.innerHTML =
-        '<td class="cell-order"><button type="button" class="order-check" title="ثبت سفارش" aria-label="ثبت سفارش" aria-pressed="false" onclick="toggleDashOrder(' + row.dataset.id + ')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></button></td>' +
-        '<td class="cell-supplier"><a href="/supplier/' + item.supplier_id + '" style="font-weight:600; text-decoration:none;">' + escapeHtml(item.supplier_name) + '</a></td>' +
+        '<td class="cell-order" onclick="event.stopPropagation()"><button type="button" class="order-check" title="ثبت سفارش" aria-label="ثبت سفارش" aria-pressed="false" onclick="toggleDashOrder(' + row.dataset.id + ')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></button></td>' +
         '<td class="cell-product"><strong>' + escapeHtml(item.product_name) + "</strong></td>" +
+        '<td class="cell-supplier muted">' + escapeHtml(item.supplier_name) + "</td>" +
         '<td class="mono cell-quantity">' + escapeHtml(item.quantity) + "</td>" +
         '<td class="cell-unit"><span class="tag">' + escapeHtml(item.unit) + "</span></td>" +
         '<td class="cell-description muted">' + escapeHtml(item.description || "") + "</td>" +
-        '<td><button type="button" class="icon-btn" title="ویرایش" onclick="startDashEdit(' + row.dataset.id + ')">' +
+        '<td class="cell-actions" onclick="event.stopPropagation()"><button type="button" class="icon-btn" title="ویرایش" onclick="startDashEdit(' + row.dataset.id + ')">' +
           '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button></td>' +
-        '<td><button type="button" class="icon-btn danger" title="حذف" onclick="deleteDashProduct(' + row.dataset.id + ')">' +
+        '<td class="cell-actions" onclick="event.stopPropagation()"><button type="button" class="icon-btn danger" title="حذف" onclick="deleteDashProduct(' + row.dataset.id + ')">' +
           '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button></td>';
     }
   </script>
