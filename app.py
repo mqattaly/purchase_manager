@@ -62,6 +62,22 @@ app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 60 * 60 * 24 * 365
 if os.environ.get("VERCEL"):
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"poolclass": NullPool}
 
+# سرو مطمئن فایل‌های static (لوگو، آیکون، CSS و JS) روی هاست‌هایی مثل لیارا که
+# اپ را با gunicorn پشت پروکسی اجرا می‌کنند. اگر whitenoise نصب نباشد، خود فلسک
+# مثل قبل فایل‌ها را سرو می‌کند و چیزی خراب نمی‌شود.
+try:
+    from whitenoise import WhiteNoise
+
+    app.wsgi_app = WhiteNoise(
+        app.wsgi_app,
+        root=os.path.join(BASE_DIR, "static"),
+        prefix="static/",
+        max_age=60 * 60 * 24 * 7,
+        autorefresh=True,
+    )
+except Exception:  # pragma: no cover - نبود whitenoise نباید اپ را زمین بزند
+    pass
+
 
 AUTH_COOKIE = "listia_auth"
 AUTH_MAX_AGE = 60 * 60 * 24 * 30
@@ -154,6 +170,27 @@ def normalize_name(name):
     name = " ".join((name or "").split())
     name = name.replace("ي", "ی").replace("ك", "ک")
     return name.strip().lower()
+
+
+# ترتیب الفبای فارسی — چون مرتب‌سازی پیش‌فرض دیتابیس روی حروف فارسی درست نیست
+PERSIAN_ALPHABET = "آابپتثجچحخدذرزژسشصضطظعغفقکگلمنوهی"
+_PERSIAN_RANK = {ch: index for index, ch in enumerate(PERSIAN_ALPHABET)}
+
+
+def supplier_sort_key(name):
+    """کلید مرتب‌سازی نام‌ها بر اساس الفبای فارسی (لاتین و عدد بعد از آن)."""
+    cleaned = (name or "").replace("ي", "ی").replace("ك", "ک").replace("\u200c", " ").strip().lower()
+    key = []
+    for ch in cleaned:
+        if ch in _PERSIAN_RANK:
+            key.append((0, _PERSIAN_RANK[ch]))
+        elif ch.isspace():
+            key.append((1, 0))
+        elif ch.isdigit():
+            key.append((2, ord(ch)))
+        else:
+            key.append((3, ord(ch)))
+    return key
 
 
 def wants_json():
@@ -381,16 +418,73 @@ def user_suppliers():
     """All suppliers of the logged-in user, alphabetically."""
     if hasattr(g, "suppliers"):
         return g.suppliers
-    g.suppliers = Supplier.query.filter_by(owner_id=current_user.id).order_by(Supplier.name).all()
+    rows = Supplier.query.filter_by(owner_id=current_user.id).order_by(Supplier.name).all()
+    g.suppliers = sorted(rows, key=lambda s: supplier_sort_key(s.name))
     return g.suppliers
+
+
+def active_clause():
+    """A product counts as «active» when it is not ordered yet.
+
+    Rows written by older versions of the app (or imported straight into the
+    database) can carry ``ordered = NULL`` instead of ``FALSE``. In SQL,
+    ``ordered = FALSE`` skips those rows, which used to make the per-supplier
+    counters show 0 for data registered before. Treat NULL as «not ordered».
+    """
+    return or_(Product.ordered.is_(False), Product.ordered.is_(None))
+
+
+def archived_clause():
+    return Product.ordered.is_(True)
 
 
 def user_products(**filters):
     """Base product query scoped to the logged-in user (supplier eagerly loaded)."""
-    return (
+    ordered = filters.pop("ordered", None)
+    query = (
         Product.query.options(joinedload(Product.supplier))
         .filter_by(owner_id=current_user.id, **filters)
     )
+    if ordered is True:
+        query = query.filter(archived_clause())
+    elif ordered is False:
+        query = query.filter(active_clause())
+    return query
+
+
+def active_counts_by_supplier(supplier_ids=None):
+    """{supplier_id: active product count} for the logged-in user."""
+    query = (
+        db.session.query(Product.supplier_id, db.func.count(Product.id))
+        .filter(Product.owner_id == current_user.id, active_clause())
+    )
+    if supplier_ids is not None:
+        if not supplier_ids:
+            return {}
+        query = query.filter(Product.supplier_id.in_(list(supplier_ids)))
+    return {sid: total for sid, total in query.group_by(Product.supplier_id).all()}
+
+
+def dashboard_counters():
+    """Live numbers shown on the dashboard, always read straight from the DB."""
+    active_count = archived_count = 0
+    for ordered_flag, total in (
+        db.session.query(Product.ordered, db.func.count(Product.id))
+        .filter(Product.owner_id == current_user.id)
+        .group_by(Product.ordered)
+        .all()
+    ):
+        if ordered_flag:
+            archived_count += total
+        else:
+            active_count += total
+
+    return {
+        "active_count": active_count,
+        "archived_count": archived_count,
+        "supplier_count": len(user_suppliers()),
+        "suppliers": active_counts_by_supplier(),
+    }
 
 
 def recent_product_names(limit=150):
@@ -543,6 +637,19 @@ def ensure_schema():
             except Exception:
                 pass
 
+        # Legacy rows can hold NULL instead of FALSE, which silently dropped them
+        # out of every «active order» count. Normalise them once.
+        for statement in (
+            "UPDATE product SET ordered = FALSE WHERE ordered IS NULL",
+            "UPDATE product SET ordered = 0 WHERE ordered IS NULL",
+        ):
+            try:
+                with conn.begin_nested():
+                    conn.execute(text(statement))
+                break
+            except Exception:
+                pass
+
         try:
             conn.execute(
                 text(
@@ -566,15 +673,37 @@ def ensure_schema():
         db.session.commit()
 
 
+BRAND_FILES = (
+    "style.css",
+    "app.js",
+    "logo.png",
+    "logo-192.png",
+    "logo-512.png",
+    "favicon.png",
+    "favicon-32.png",
+    "favicon.ico",
+    "apple-touch-icon.png",
+)
+
+
 def _asset_version():
-    """Cache-busting stamp so browsers can cache CSS/JS for a year."""
+    """Cache-busting stamp so browsers can cache CSS/JS/آیکون‌ها for a year.
+
+    اندازه فایل‌ها هم در امضا می‌آید تا اگر لوگو یا فاوآیکون عوض شود — حتی
+    وقتی تاریخ فایل‌ها روی سرور یکسان است (مثل دیپلوی‌های Vercel) — مرورگر
+    نسخه تازه را بگیرد و نسخه کش‌شده قدیمی را نشان ندهد.
+    """
     stamp = 0
-    for name in ("style.css", "app.js"):
+    total_size = 0
+    for name in BRAND_FILES:
+        path = os.path.join(BASE_DIR, "static", name)
         try:
-            stamp = max(stamp, int(os.path.getmtime(os.path.join(BASE_DIR, "static", name))))
+            stat = os.stat(path)
         except OSError:
-            pass
-    return str(stamp)
+            continue
+        stamp = max(stamp, int(stat.st_mtime))
+        total_size += stat.st_size
+    return f"{stamp}-{total_size}"
 
 
 ASSET_VERSION = _asset_version()
@@ -613,11 +742,83 @@ def _prepare_request():
         if user:
             login_user(user, remember=True)
 
-    allowed = {"login", "signup", "static", "api_quick_add", "api_suppliers"}
+    allowed = {
+        "login",
+        "signup",
+        "static",
+        "api_quick_add",
+        "api_suppliers",
+        "brand_asset",
+        "web_manifest",
+    }
     if request.endpoint in allowed or request.endpoint is None:
         return
     if not current_user.is_authenticated:
         return redirect(url_for("login"))
+
+
+# ---------------------------------------------------------------------------
+#  لوگو و آیکون‌ها — فایل‌ها در پوشه static می‌مانند، ولی از ریشه هم سرو می‌شوند
+#  تا حتی اگر هاست مسیر /static را جای دیگری بفرستد، آیکون‌ها نمایش داده شوند.
+# ---------------------------------------------------------------------------
+
+BRAND_ROUTE_FILES = {
+    "favicon.ico": "image/x-icon",
+    "favicon.png": "image/png",
+    "favicon-32.png": "image/png",
+    "favicon-16.png": "image/png",
+    "apple-touch-icon.png": "image/png",
+    "apple-touch-icon-precomposed.png": "image/png",
+    "logo.png": "image/png",
+    "logo-192.png": "image/png",
+    "logo-512.png": "image/png",
+}
+
+
+@app.route("/favicon.ico")
+@app.route("/favicon.png")
+@app.route("/favicon-32.png")
+@app.route("/favicon-16.png")
+@app.route("/apple-touch-icon.png")
+@app.route("/apple-touch-icon-precomposed.png")
+@app.route("/logo.png")
+@app.route("/logo-192.png")
+@app.route("/logo-512.png")
+def brand_asset():
+    filename = os.path.basename(request.path)
+    mimetype = BRAND_ROUTE_FILES.get(filename, "image/png")
+    path = os.path.join(BASE_DIR, "static", filename)
+    if not os.path.exists(path):
+        fallback = "logo.png" if filename.startswith(("logo", "apple")) else "favicon.png"
+        path = os.path.join(BASE_DIR, "static", fallback)
+        if not os.path.exists(path):
+            return json_error("فایل آیکون پیدا نشد.", 404)
+        mimetype = "image/png"
+    return send_file(path, mimetype=mimetype, max_age=60 * 60 * 24 * 7)
+
+
+@app.route("/manifest.webmanifest")
+def web_manifest():
+    """معرفی اپ برای نصب روی موبایل (Add to Home Screen) با لوگوی خودمان."""
+    response = make_response({
+        "name": "لیستیا — مدیریت سفارش و خرید",
+        "short_name": "لیستیا",
+        "description": "سامانه مدیریت هوشمند خرید و سفارش‌های فروشگاه",
+        "start_url": "/",
+        "scope": "/",
+        "display": "standalone",
+        "dir": "rtl",
+        "lang": "fa",
+        "background_color": "#F3F6F8",
+        "theme_color": "#142430",
+        "icons": [
+            {"src": f"/logo-192.png?v={ASSET_VERSION}", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+            {"src": f"/logo-512.png?v={ASSET_VERSION}", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+            {"src": f"/logo-512.png?v={ASSET_VERSION}", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
+        ],
+    })
+    response.headers["Content-Type"] = "application/manifest+json; charset=utf-8"
+    return response
 
 
 @app.route("/")
@@ -625,28 +826,15 @@ def home():
     """صفحه اول اپلیکیشن: داشبورد"""
     suppliers = user_suppliers()
 
-    active_count = archived_count = 0
-    for ordered_flag, total in (
-        db.session.query(Product.ordered, db.func.count(Product.id))
-        .filter(Product.owner_id == current_user.id)
-        .group_by(Product.ordered)
-        .all()
-    ):
-        if ordered_flag:
-            archived_count += total
-        else:
-            active_count += total
+    counters = dashboard_counters()
+    active_count = counters["active_count"]
+    archived_count = counters["archived_count"]
 
     recent = (
         user_products(ordered=False).order_by(Product.id.desc()).limit(15).all()
     )
 
-    active_by_supplier = dict(
-        db.session.query(Product.supplier_id, db.func.count(Product.id))
-        .filter(Product.owner_id == current_user.id, Product.ordered.is_(False))
-        .group_by(Product.supplier_id)
-        .all()
-    )
+    active_by_supplier = counters["suppliers"]
 
     limits = cached_limits()
 
@@ -816,7 +1004,19 @@ def check_duplicate():
 
 @app.route("/purchases")
 def purchases():
-    all_products = user_products(ordered=False).order_by(Product.id.desc()).all()
+    # اول بر اساس تأمین‌کننده گروه می‌شود، بعد داخل هر تأمین‌کننده به ترتیب ورود.
+    all_products = (
+        user_products(ordered=False)
+        .join(Supplier, Product.supplier_id == Supplier.id)
+        .order_by(Supplier.name.asc(), Product.id.asc())
+        .all()
+    )
+    all_products.sort(
+        key=lambda item: (
+            supplier_sort_key(item.supplier.name if item.supplier else ""),
+            item.id,
+        )
+    )
     return render_template("purchases.html", products=all_products, suppliers=user_suppliers())
 
 
@@ -972,17 +1172,15 @@ def suppliers():
 def supplier_detail(supplier_id):
     supplier = owned_supplier_or_404(supplier_id)
     active_products = (
-        Product.query.filter_by(
-            owner_id=current_user.id, supplier_id=supplier_id, ordered=False
-        )
+        Product.query.filter_by(owner_id=current_user.id, supplier_id=supplier_id)
+        .filter(active_clause())
         .order_by(Product.id.desc())
         .all()
     )
 
     archived_products = (
-        Product.query.filter_by(
-            owner_id=current_user.id, supplier_id=supplier_id, ordered=True
-        )
+        Product.query.filter_by(owner_id=current_user.id, supplier_id=supplier_id)
+        .filter(archived_clause())
         .order_by(Product.ordered_date.desc().nullslast(), Product.id.desc())
         .all()
     )
@@ -1085,18 +1283,7 @@ def api_search():
         .all()
     )
     supplier_ids = [supplier.id for supplier in matching_suppliers]
-    active_counts = {}
-    if supplier_ids:
-        active_counts = dict(
-            db.session.query(Product.supplier_id, db.func.count(Product.id))
-            .filter(
-                Product.owner_id == current_user.id,
-                Product.ordered.is_(False),
-                Product.supplier_id.in_(supplier_ids),
-            )
-            .group_by(Product.supplier_id)
-            .all()
-        )
+    active_counts = active_counts_by_supplier(supplier_ids)
 
     return {
         "results": [product_payload(item) for item in matches],
@@ -1390,6 +1577,34 @@ def api_suppliers():
     }
 
 
+@app.route("/api/dashboard/stats")
+def api_dashboard_stats():
+    """شمارنده‌های زنده داشبورد (سفارش فعال، آرشیو و تعداد هر تأمین‌کننده).
+
+    داشبورد بعد از باز شدن صفحه و بعد از هر تغییر این را می‌خواند تا عددهای
+    کارت تأمین‌کننده‌ها دقیقاً با دیتابیس یکی باشد؛ حتی برای محصولاتی که
+    قبلاً ثبت شده‌اند.
+    """
+    if not current_user.is_authenticated:
+        return json_error("ابتدا وارد شوید.", 401)
+
+    counters = dashboard_counters()
+    return {
+        "success": True,
+        "active_count": counters["active_count"],
+        "archived_count": counters["archived_count"],
+        "supplier_count": counters["supplier_count"],
+        "suppliers": [
+            {
+                "id": s.id,
+                "name": s.name,
+                "active_count": counters["suppliers"].get(s.id, 0),
+            }
+            for s in user_suppliers()
+        ],
+    }
+
+
 @app.route("/api/license-status")
 def api_license_status():
     """دریافت وضعیت لایسنس کاربر برای UI"""
@@ -1437,31 +1652,199 @@ def activate_license():
 #  پنل ادمین: تولید لایسنس داخل وب‌اپلیکیشن (مخصوص س.م.قتالی smq2458)
 # ---------------------------------------------------------------------------
 
+def admin_user_payload(user):
+    """اطلاعات یک کاربر برای جدول مدیریت (پنل مدیر)."""
+    user_limits = get_user_limits(user)
+    return {
+        "id": user.id,
+        "username": user.username,
+        "user_code": user_limits["user_code"],
+        "is_licensed": user_limits["is_licensed"],
+        "is_expired": user_limits["is_expired"],
+        "is_lifetime": user_limits["is_lifetime"],
+        "remaining_days": user_limits["remaining_days"],
+        "expires_at_label": user_limits["expires_at_label"],
+        "expires_at_iso": user.license_expires_at.date().isoformat() if user.license_expires_at else "",
+        "supplier_count": user_limits["supplier_count"],
+        "product_count": user_limits["product_count"],
+        "license_type": user.license_type or "free",
+        "license_key": user.license_key or "",
+        "is_admin": bool(is_admin_user(user)),
+        "is_protected": bool(user.username and user.username.lower() in ADMIN_USERNAMES),
+        "is_self": bool(current_user.is_authenticated and user.id == current_user.id),
+    }
+
+
+def admin_target_user(user_id):
+    """(user, error) — کاربر هدف عملیات مدیریتی."""
+    if not is_admin_user(current_user):
+        return None, json_error("دسترسی به این بخش فقط برای مدیر نرم‌افزار مجاز است.", 403)
+    user = db.session.get(User, user_id)
+    if not user:
+        return None, json_error("کاربر پیدا نشد.", 404)
+    return user, None
+
+
+def refresh_license_key(user):
+    """کلید ذخیره‌شده را با نام کاربری فعلی هم‌خوان می‌کند (کلیدها به نام کاربر گره خورده‌اند)."""
+    if not user.is_licensed:
+        return None
+    if user.license_expires_at:
+        days = max(1, (user.license_expires_at - datetime.now()).days + 1)
+        period_code, _, _ = normalize_duration(str(days))
+    else:
+        period_code = "LIFE"
+    user.license_key = generate_key(user.username, user.license_type or "PRO", period_code)
+    return user.license_key
+
+
 @app.route("/admin/license-generator")
 def admin_license_generator():
     if not is_admin_user(current_user):
         return json_error("دسترسی به این بخش فقط برای مدیر نرم‌افزار مجاز است.", 403)
 
     all_users = User.query.order_by(User.id.desc()).all()
-    user_list = []
-    for u in all_users:
-        user_limits = get_user_limits(u)
-        user_list.append({
-            "id": u.id,
-            "username": u.username,
-            "user_code": user_limits["user_code"],
-            "is_licensed": user_limits["is_licensed"],
-            "is_expired": user_limits["is_expired"],
-            "is_lifetime": user_limits["is_lifetime"],
-            "remaining_days": user_limits["remaining_days"],
-            "expires_at_label": user_limits["expires_at_label"],
-            "supplier_count": user_limits["supplier_count"],
-            "product_count": user_limits["product_count"],
-            "license_type": u.license_type,
-            "license_key": u.license_key,
-        })
+    return render_template("admin_license.html", users=[admin_user_payload(u) for u in all_users])
 
-    return render_template("admin_license.html", users=user_list)
+
+@app.route("/api/admin/users/<int:user_id>/update", methods=["POST"])
+def api_admin_update_user(user_id):
+    """ویرایش کاربر توسط مدیر: نام کاربری، رمز عبور و دسترسی مدیریت."""
+    user, error = admin_target_user(user_id)
+    if error:
+        return error
+
+    username = request.form.get("username", "").strip()[:100]
+    new_password = request.form.get("new_password", "")
+    admin_flag = request.form.get("is_admin")
+
+    changes = []
+
+    if username and username != user.username:
+        if len(username) < 2:
+            return json_error("نام کاربری خیلی کوتاه است.")
+        exists = User.query.filter(
+            db.func.lower(User.username) == username.lower(), User.id != user.id
+        ).first()
+        if exists:
+            return json_error("این نام کاربری قبلاً وجود دارد.")
+        old_username = user.username
+        user.username = username
+        # کلید لایسنس به نام کاربری گره خورده؛ با تغییر نام، کلید تازه صادر می‌شود.
+        refresh_license_key(user)
+        changes.append(f"نام کاربری از «{old_username}» به «{username}» تغییر کرد")
+
+    if new_password:
+        if len(new_password) < 4:
+            return json_error("رمز عبور جدید حداقل ۴ کاراکتر باشد.")
+        user.password_hash = generate_password_hash(new_password)
+        changes.append("رمز عبور بازنشانی شد")
+
+    if admin_flag is not None:
+        wants_admin = admin_flag in ("1", "true", "on")
+        if not wants_admin and user.id == current_user.id:
+            return json_error("دسترسی مدیریت حساب خودتان را نمی‌توانید بردارید.")
+        if not wants_admin and user.username.lower() in ADMIN_USERNAMES:
+            return json_error("این حساب مدیر اصلی سامانه است و قابل تغییر نیست.")
+        if bool(user.is_admin) != wants_admin:
+            user.is_admin = wants_admin
+            if wants_admin:
+                user.is_licensed = True
+            changes.append("دسترسی مدیریت " + ("داده شد" if wants_admin else "برداشته شد"))
+
+    if not changes:
+        return json_error("تغییری برای ذخیره وجود ندارد.")
+
+    db.session.commit()
+    return {
+        "success": True,
+        "message": "✓ " + "، ".join(changes),
+        "user": admin_user_payload(user),
+    }
+
+
+@app.route("/api/admin/users/<int:user_id>/license", methods=["POST"])
+def api_admin_update_license(user_id):
+    """ویرایش یا حذف لایسنس یک کاربر توسط مدیر."""
+    user, error = admin_target_user(user_id)
+    if error:
+        return error
+
+    action = request.form.get("action", "grant").strip().lower()
+
+    if action in ("revoke", "delete", "remove"):
+        if user.username.lower() in ADMIN_USERNAMES:
+            return json_error("لایسنس حساب مدیر اصلی قابل حذف نیست.")
+        user.is_licensed = False
+        user.license_key = None
+        user.licensed_at = None
+        user.license_expires_at = None
+        user.license_type = "free"
+        if user.id != current_user.id:
+            user.is_admin = bool(user.is_admin and user.username.lower() in ADMIN_USERNAMES)
+        db.session.commit()
+        return {
+            "success": True,
+            "message": f"لایسنس «{user.username}» حذف شد و حساب به نسخه آزمایشی برگشت.",
+            "user": admin_user_payload(user),
+        }
+
+    tier = request.form.get("tier", "PRO").strip().upper() or "PRO"
+    duration = request.form.get("duration", "LIFE").strip()
+    expires_at_raw = request.form.get("expires_at", "").strip()
+
+    if duration.upper() == "CUSTOM":
+        duration = request.form.get("custom_days", "").strip() or "LIFE"
+
+    if expires_at_raw:
+        try:
+            target = date.fromisoformat(expires_at_raw)
+        except ValueError:
+            return json_error("تاریخ انقضا معتبر نیست.")
+        days = (target - date.today()).days
+        if days <= 0:
+            return json_error("تاریخ انقضا باید بعد از امروز باشد.")
+        period_code, days, duration_label = normalize_duration(str(days))
+        expires_at = datetime.combine(target, datetime.min.time()).replace(hour=23, minute=59)
+    else:
+        period_code, days, duration_label = normalize_duration(duration)
+        expires_at = datetime.now() + timedelta(days=days) if days else None
+
+    user.is_licensed = True
+    user.license_type = tier
+    user.licensed_at = user.licensed_at or datetime.now()
+    user.license_expires_at = expires_at
+    user.license_key = generate_key(user.username, tier, period_code)
+    db.session.commit()
+
+    validity = "مادام‌العمر (دائمی)" if expires_at is None else f"تا {shamsi_label(expires_at.date())}"
+    return {
+        "success": True,
+        "message": f"لایسنس «{user.username}» به‌روزرسانی شد — {duration_label} ({validity}).",
+        "license_key": user.license_key,
+        "user": admin_user_payload(user),
+    }
+
+
+@app.route("/api/admin/users/<int:user_id>/delete", methods=["POST"])
+def api_admin_delete_user(user_id):
+    """حذف کامل یک کاربر همراه با تأمین‌کننده‌ها و محصولاتش."""
+    user, error = admin_target_user(user_id)
+    if error:
+        return error
+
+    if user.id == current_user.id:
+        return json_error("حساب خودتان را نمی‌توانید حذف کنید.")
+    if user.username.lower() in ADMIN_USERNAMES:
+        return json_error("حساب مدیر اصلی سامانه قابل حذف نیست.")
+
+    username = user.username
+    Product.query.filter_by(owner_id=user.id).delete(synchronize_session=False)
+    Supplier.query.filter_by(owner_id=user.id).delete(synchronize_session=False)
+    db.session.delete(user)
+    db.session.commit()
+
+    return {"success": True, "message": f"کاربر «{username}» و همه داده‌هایش حذف شد.", "id": user_id}
 
 
 @app.route("/api/admin/generate-license", methods=["POST"])
@@ -1520,8 +1903,8 @@ def regenerate_token():
 def account():
     """Personal account page — only ever shows the logged-in user's own data."""
     supplier_count = Supplier.query.filter_by(owner_id=current_user.id).count()
-    active_count = Product.query.filter_by(owner_id=current_user.id, ordered=False).count()
-    archived_count = Product.query.filter_by(owner_id=current_user.id, ordered=True).count()
+    active_count = Product.query.filter_by(owner_id=current_user.id).filter(active_clause()).count()
+    archived_count = Product.query.filter_by(owner_id=current_user.id).filter(archived_clause()).count()
 
     user = db.session.get(User, current_user.id)
     limits = get_user_limits(user)
@@ -1539,25 +1922,11 @@ def account():
 
 @app.route("/account/username", methods=["POST"])
 def change_username():
-    new_username = request.form.get("username", "").strip()
-    password = request.form.get("current_password", "")
-
-    user = db.session.get(User, current_user.id)
-
-    if not new_username:
-        return json_error("نام کاربری را وارد کنید.")
-    if len(new_username) < 2:
-        return json_error("نام کاربری خیلی کوتاه است.")
-    if not check_password_hash(user.password_hash, password):
-        return json_error("رمز عبور فعلی درست نیست.")
-    if new_username == user.username:
-        return json_error("این همان نام کاربری فعلی است.")
-    if User.query.filter(User.username == new_username, User.id != user.id).first():
-        return json_error("این نام کاربری قبلاً وجود دارد.")
-
-    user.username = new_username
-    db.session.commit()
-    return {"success": True, "username": user.username}
+    """تغییر نام کاربری فقط از پنل مدیر انجام می‌شود."""
+    return json_error(
+        "تغییر نام کاربری فقط توسط مدیر سامانه انجام می‌شود. لطفاً با پشتیبانی تماس بگیرید.",
+        403,
+    )
 
 
 @app.route("/account/password", methods=["POST"])

@@ -43,6 +43,13 @@ def normalize_duration(duration):
         days = int(d_str[1:])
         return f"{days}D", days, f"{days} روزه"
 
+    # فرمت «۱۴D» — تعداد روز دلخواه (قبلاً به اشتباه مادام‌العمر تفسیر می‌شد)
+    if d_str.endswith("D") and d_str[:-1].isdigit():
+        days = int(d_str[:-1])
+        if days <= 0:
+            return "LIFE", None, "مادام‌العمر (دائمی)"
+        return f"{days}D", days, f"{days} روزه"
+
     if d_str.isdigit():
         days = int(d_str)
         if days <= 0:

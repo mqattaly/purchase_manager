@@ -241,6 +241,8 @@
         return;
       }
 
+      const previousSupplierId = String(row.dataset.supplierId || "");
+
       row.dataset.supplierId = supplierId;
       row.dataset.supplierName = supplierName;
       row.dataset.productName = product;
@@ -257,6 +259,10 @@
         unit: unit,
         description: description
       });
+
+      if (window.DashLive) {
+        window.DashLive.onProductMoved(previousSupplierId, supplierId);
+      }
 
       background("/product/" + id + "/edit", {
         headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "fetch" },

@@ -725,7 +725,8 @@
           );
 
           if (typeof window.DashLive !== "undefined") {
-            window.DashLive.addSupplier(result.data.id, result.data.name);
+            window.DashLive.addSupplier(result.data.id, result.data.name, 0);
+            window.DashLive.scheduleRefresh();
           }
         })
         .catch(() => {
@@ -1844,15 +1845,18 @@
       if (total) total.textContent = n;
     },
 
-    addSupplier(id, name) {
+    addSupplier(id, name, activeCount) {
       if (typeof DASH_SUPPLIERS !== "undefined") {
-        DASH_SUPPLIERS.push({ id: id, name: name });
+        if (!DASH_SUPPLIERS.some(function (s) { return String(s.id) === String(id); })) {
+          DASH_SUPPLIERS.push({ id: id, name: name });
+        }
       }
       const grid = document.getElementById("dash-supplier-grid");
       const empty = document.getElementById("dash-supplier-empty");
       if (!grid) return;
       if (grid.querySelector('[data-supplier-id="' + id + '"]')) return;
 
+      const count = Math.max(0, parseInt(activeCount, 10) || 0);
       const card = document.createElement("a");
       card.href = "/supplier/" + id;
       card.className = "supplier-home-card";
@@ -1860,17 +1864,80 @@
       card.innerHTML =
         '<span class="supplier-card-avatar">' + escapeHtml(String(name || "ت").slice(0, 1)) + "</span>" +
         '<span class="supplier-card-copy"><strong>' + escapeHtml(name) + "</strong><small>سفارش فعال</small></span>" +
-        '<span class="supplier-card-count" data-count>0</span>' +
+        '<span class="supplier-card-count" data-count>' + count + "</span>" +
         '<svg class="supplier-card-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>';
       grid.appendChild(card);
       grid.style.display = "";
       if (empty) empty.style.display = "none";
-      this.bump(document.getElementById("stat-suppliers"), 1);
+      const stat = document.getElementById("stat-suppliers");
+      if (stat) stat.textContent = grid.querySelectorAll("[data-supplier-id]").length;
     },
 
     bumpSupplier(supplierId, delta) {
       const card = document.querySelector('#dash-supplier-grid [data-supplier-id="' + supplierId + '"] [data-count]');
       if (card) this.bump(card, delta);
+    },
+
+    setSupplierCount(supplierId, value) {
+      const card = document.querySelector('#dash-supplier-grid [data-supplier-id="' + supplierId + '"] [data-count]');
+      if (card) card.textContent = Math.max(0, parseInt(value, 10) || 0);
+    },
+
+    /**
+     * The counters are optimistic (they move the instant you click), but the
+     * database stays the single source of truth: after every change — and once
+     * when the page opens — we pull the real numbers, so orders registered
+     * earlier (even from another device) are always included.
+     */
+    refresh() {
+      if (!document.getElementById("dash-supplier-grid")) return Promise.resolve(null);
+      return request("/api/dashboard/stats")
+        .then(function (result) {
+          if (!result.ok || !result.data || !result.data.suppliers) return null;
+          DashLive.applyStats(result.data);
+          return result.data;
+        })
+        .catch(function () { return null; });
+    },
+
+    scheduleRefresh(delay) {
+      if (this._refreshTimer) clearTimeout(this._refreshTimer);
+      this._refreshTimer = setTimeout(function () {
+        DashLive._refreshTimer = null;
+        DashLive.refresh();
+      }, typeof delay === "number" ? delay : 500);
+    },
+
+    applyStats(stats) {
+      const active = document.getElementById("stat-active");
+      if (active && typeof stats.active_count === "number") active.textContent = stats.active_count;
+
+      const archived = document.getElementById("stat-archived");
+      if (archived && typeof stats.archived_count === "number") archived.textContent = stats.archived_count;
+
+      const total = document.getElementById("dash-recent-total");
+      if (total && typeof stats.active_count === "number") total.textContent = stats.active_count;
+
+      const suppliers = stats.suppliers || [];
+      const supplierStat = document.getElementById("stat-suppliers");
+      if (supplierStat) supplierStat.textContent = suppliers.length;
+
+      suppliers.forEach(function (item) {
+        const card = document.querySelector('#dash-supplier-grid [data-supplier-id="' + item.id + '"]');
+        if (!card) {
+          DashLive.addSupplier(item.id, item.name, item.active_count);
+          return;
+        }
+        DashLive.setSupplierCount(item.id, item.active_count);
+      });
+
+      const grid = document.getElementById("dash-supplier-grid");
+      const empty = document.getElementById("dash-supplier-empty");
+      if (grid && empty) {
+        const has = grid.querySelectorAll("[data-supplier-id]").length > 0;
+        grid.style.display = has ? "" : "none";
+        empty.style.display = has ? "none" : "";
+      }
     },
 
     onProductSaved(product) {
@@ -1879,6 +1946,7 @@
       if (total) this.bump(total, 1);
       this.bumpSupplier(product.supplier_id, 1);
       this.prependRecent(product);
+      this.scheduleRefresh();
     },
 
     onProductRemoved(id, supplierId) {
@@ -1891,6 +1959,7 @@
         row.remove();
         if (typeof updateDashEmpty === "function") updateDashEmpty();
       }
+      this.scheduleRefresh();
     },
 
     onOrdered(id, supplierId) {
@@ -1899,6 +1968,15 @@
       const total = document.getElementById("dash-recent-total");
       if (total) this.bump(total, -1);
       if (supplierId) this.bumpSupplier(supplierId, -1);
+      this.scheduleRefresh();
+    },
+
+    onProductMoved(fromSupplierId, toSupplierId) {
+      if (String(fromSupplierId) !== String(toSupplierId)) {
+        if (fromSupplierId) this.bumpSupplier(fromSupplierId, -1);
+        if (toSupplierId) this.bumpSupplier(toSupplierId, 1);
+      }
+      this.scheduleRefresh();
     },
 
     prependRecent(product) {
@@ -1964,5 +2042,18 @@
     QuickAdd.init(
       document.getElementById("quick-add")
     );
+
+    // Sync the dashboard counters with the database as soon as the page opens,
+    // so suppliers with orders registered earlier don't start from zero.
+    DashLive.refresh();
+  });
+
+  // Coming back from the browser cache (bfcache) or another tab: re-sync.
+  window.addEventListener("pageshow", function (event) {
+    if (event.persisted) DashLive.refresh();
+  });
+
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") DashLive.scheduleRefresh(200);
   });
 })(window, document);

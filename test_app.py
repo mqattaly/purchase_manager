@@ -2,6 +2,7 @@ import io
 import unittest
 from datetime import datetime, timedelta
 import pandas as pd
+from werkzeug.security import check_password_hash
 from app import app, db, User, Supplier, Product, get_user_limits, issue_api_token, is_admin_user
 from licensing import get_user_code, generate_key, generate_master_key, verify_key
 
@@ -118,6 +119,185 @@ class ListiaTestCase(unittest.TestCase):
             prod = db.session.get(Product, p_id)
             self.assertEqual(prod.supplier_id, s2_id)
             self.assertEqual(prod.product_name, "کالای تستی منتقل شده")
+
+    def test_supplier_card_counters_include_previous_products(self):
+        """کارت تأمین‌کننده باید محصولات قبلی را هم بشمارد، نه فقط ثبت‌های جدید."""
+        self.register_and_login("smq2458", "adminpassword")
+
+        res = self.client.post("/suppliers", data={"name": "تأمین کننده قدیمی"}, headers={"X-Requested-With": "fetch"})
+        s_id = res.get_json()["id"]
+
+        with app.app_context():
+            user = User.query.filter_by(username="smq2458").first()
+            # سه ردیف «قدیمی» مثل داده‌های نسخه‌های قبلی که ordered آن‌ها NULL است
+            for i in range(3):
+                db.session.add(Product(
+                    owner_id=user.id,
+                    supplier_id=s_id,
+                    product_name=f"کالای قدیمی {i}",
+                    quantity="2",
+                    unit="عدد",
+                    ordered=None,
+                ))
+            db.session.commit()
+
+        res = self.client.get("/api/dashboard/stats", headers={"X-Requested-With": "fetch"})
+        self.assertEqual(res.status_code, 200)
+        stats = res.get_json()
+        self.assertTrue(stats["success"])
+        self.assertEqual(stats["active_count"], 3)
+        self.assertEqual(stats["archived_count"], 0)
+        card = next(item for item in stats["suppliers"] if item["id"] == s_id)
+        self.assertEqual(card["active_count"], 3)
+
+        # همان عدد باید در HTML داشبورد هم رندر شود (نه صفر)
+        html = self.client.get("/").get_data(as_text=True)
+        marker = html.split(f'data-supplier-id="{s_id}"', 1)[1]
+        rendered = marker.split('data-count>', 1)[1].split("<", 1)[0]
+        self.assertEqual(rendered.strip(), "3")
+        self.assertIn("کالای قدیمی 0", html)
+
+        # ثبت محصول جدید: شمارنده باید زنده جلو برود (۴ شود)
+        self.client.post("/new-purchase", data={
+            "supplier": str(s_id),
+            "product": "کالای جدید",
+            "quantity": "1",
+            "unit": "عدد",
+            "description": "",
+        }, headers={"X-Requested-With": "fetch"})
+
+        stats = self.client.get("/api/dashboard/stats", headers={"X-Requested-With": "fetch"}).get_json()
+        card = next(item for item in stats["suppliers"] if item["id"] == s_id)
+        self.assertEqual(card["active_count"], 4)
+        self.assertEqual(stats["active_count"], 4)
+
+        # ثبت سفارش یکی از محصولات قدیمی: شمارنده باید کم شود و به آرشیو برود
+        with app.app_context():
+            old_id = Product.query.filter_by(product_name="کالای قدیمی 0").first().id
+        self.client.post(f"/toggle-order/{old_id}", headers={"X-Requested-With": "fetch"})
+
+        stats = self.client.get("/api/dashboard/stats", headers={"X-Requested-With": "fetch"}).get_json()
+        card = next(item for item in stats["suppliers"] if item["id"] == s_id)
+        self.assertEqual(card["active_count"], 3)
+        self.assertEqual(stats["active_count"], 3)
+        self.assertEqual(stats["archived_count"], 1)
+
+    def test_purchases_sorted_by_supplier_then_entry_order(self):
+        """لیست خریدها: اول گروه تأمین‌کننده، بعد ترتیب ورود محصول‌ها."""
+        self.register_and_login("smq2458", "adminpassword")
+
+        ids = {}
+        for name in ("ب تأمین دوم", "الف تأمین اول"):
+            res = self.client.post("/suppliers", data={"name": name}, headers={"X-Requested-With": "fetch"})
+            ids[name] = res.get_json()["id"]
+
+        # ثبت به‌صورت ضربدری تا ترتیب ورود با ترتیب تأمین‌کننده یکی نباشد
+        order = [
+            ("ب تأمین دوم", "ب-۱"),
+            ("الف تأمین اول", "الف-۱"),
+            ("ب تأمین دوم", "ب-۲"),
+            ("الف تأمین اول", "الف-۲"),
+        ]
+        for supplier_name, product in order:
+            self.client.post("/new-purchase", data={
+                "supplier": str(ids[supplier_name]),
+                "product": product,
+                "quantity": "1",
+                "unit": "عدد",
+                "description": "",
+            }, headers={"X-Requested-With": "fetch"})
+
+        html = self.client.get("/purchases").get_data(as_text=True)
+        body = html.split('id="purchases-body"', 1)[1]
+        positions = [(body.index(name), name) for _, name in order]
+        self.assertEqual(
+            [name for _, name in sorted(positions)],
+            ["الف-۱", "الف-۲", "ب-۱", "ب-۲"],
+        )
+        # هر گروه یک ردیف شروع دارد
+        rows_html = body.split("</table>", 1)[0]
+        self.assertEqual(rows_html.count('class="supplier-group-start"'), 2)
+
+    def test_admin_can_manage_users_and_licenses(self):
+        """مدیر می‌تواند کاربر و لایسنس را ویرایش و حذف کند؛ کاربر عادی نه."""
+        # یک کاربر عادی می‌سازیم
+        self.register_and_login("mohammad", "123456")
+        with app.app_context():
+            target_id = User.query.filter_by(username="mohammad").first().id
+        # کاربر عادی نباید به عملیات مدیریتی دسترسی داشته باشد
+        res = self.client.post(f"/api/admin/users/{target_id}/update",
+                               data={"username": "hacker"}, headers={"X-Requested-With": "fetch"})
+        self.assertEqual(res.status_code, 403)
+        # کاربر عادی نباید بتواند نام کاربری خودش را عوض کند
+        res = self.client.post("/account/username",
+                               data={"username": "newname", "current_password": "123456"},
+                               headers={"X-Requested-With": "fetch"})
+        self.assertEqual(res.status_code, 403)
+        with app.app_context():
+            self.assertIsNotNone(User.query.filter_by(username="mohammad").first())
+
+        # حالا با حساب مدیر
+        self.client.get("/logout")
+        self.register_and_login("smq2458", "adminpassword")
+
+        # ۱) ویرایش کاربر: نام کاربری و رمز عبور
+        res = self.client.post(f"/api/admin/users/{target_id}/update",
+                               data={"username": "mohammad-new", "new_password": "9876"},
+                               headers={"X-Requested-With": "fetch"})
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.get_json()["success"])
+        with app.app_context():
+            target = db.session.get(User, target_id)
+            self.assertEqual(target.username, "mohammad-new")
+            self.assertTrue(check_password_hash(target.password_hash, "9876"))
+
+        # ۲) ویرایش لایسنس: ۶۰ روزه
+        res = self.client.post(f"/api/admin/users/{target_id}/license",
+                               data={"action": "grant", "tier": "PRO", "duration": "60D"},
+                               headers={"X-Requested-With": "fetch"})
+        self.assertEqual(res.status_code, 200)
+        payload = res.get_json()
+        self.assertTrue(payload["user"]["is_licensed"])
+        self.assertFalse(payload["user"]["is_lifetime"])
+        with app.app_context():
+            target = db.session.get(User, target_id)
+            self.assertTrue(target.is_licensed)
+            self.assertIsNotNone(target.license_expires_at)
+            # کلید ذخیره‌شده باید برای نام کاربری جدید معتبر باشد
+            valid, _, _, _ = verify_key(target, target.license_key)
+            self.assertTrue(valid)
+
+        # ۳) حذف لایسنس
+        res = self.client.post(f"/api/admin/users/{target_id}/license",
+                               data={"action": "revoke"}, headers={"X-Requested-With": "fetch"})
+        self.assertEqual(res.status_code, 200)
+        with app.app_context():
+            target = db.session.get(User, target_id)
+            self.assertFalse(target.is_licensed)
+            self.assertIsNone(target.license_key)
+            self.assertEqual(target.license_type, "free")
+
+        # ۴) حساب مدیر و حساب خود کاربر جاری قابل حذف نیست
+        with app.app_context():
+            admin_id = User.query.filter_by(username="smq2458").first().id
+        res = self.client.post(f"/api/admin/users/{admin_id}/delete", headers={"X-Requested-With": "fetch"})
+        self.assertEqual(res.status_code, 400)
+
+        # ۵) حذف کامل کاربر به همراه داده‌هایش
+        with app.app_context():
+            supplier = Supplier(name="تأمین کننده کاربر", owner_id=target_id)
+            db.session.add(supplier)
+            db.session.commit()
+            db.session.add(Product(owner_id=target_id, supplier_id=supplier.id,
+                                   product_name="کالای کاربر", quantity="1", unit="عدد"))
+            db.session.commit()
+
+        res = self.client.post(f"/api/admin/users/{target_id}/delete", headers={"X-Requested-With": "fetch"})
+        self.assertEqual(res.status_code, 200)
+        with app.app_context():
+            self.assertIsNone(db.session.get(User, target_id))
+            self.assertEqual(Supplier.query.filter_by(owner_id=target_id).count(), 0)
+            self.assertEqual(Product.query.filter_by(owner_id=target_id).count(), 0)
 
     def test_smq2458_admin_and_license_generator(self):
         self.register_and_login("smq2458", "adminpassword")

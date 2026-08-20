@@ -140,12 +140,13 @@
   </div>
 
   <div class="card card-pad" style="margin-bottom:22px;">
-    <h3 class="account-section-title">تغییر نام کاربری</h3>
-    <form id="username-form" class="field-row">
-      <input id="new-username" class="field" style="width:190px" placeholder="نام کاربری جدید" value="{{ current_user.username }}" autocomplete="off" required>
-      <input id="username-password" class="field" style="width:190px" type="password" placeholder="رمز عبور فعلی" autocomplete="current-password" required>
-      <button id="username-btn" type="submit" class="btn btn-accent">ذخیره نام کاربری</button>
-    </form>
+    <h3 class="account-section-title">نام کاربری</h3>
+    <div class="field-row" style="align-items:center;">
+      <input class="field" style="width:190px" value="{{ current_user.username }}" readonly disabled>
+      <span class="page-sub" style="margin:0;">
+        🔒 نام کاربری قابل تغییر توسط خودتان نیست؛ در صورت نیاز به تغییر، با مدیر سامانه تماس بگیرید.
+      </span>
+    </div>
   </div>
 
   <div class="card card-pad" style="margin-bottom:22px;">
@@ -249,21 +250,6 @@
     function copyUserCodeField() {
       copyField("account-user-code", "شناسه فعال‌سازی کپی شد");
     }
-
-    document.getElementById("username-form").addEventListener("submit", function (e) {
-      e.preventDefault();
-      const username = document.getElementById("new-username").value.trim();
-      const currentPassword = document.getElementById("username-password").value;
-      if (!username || !currentPassword) return;
-
-      post("/account/username", { username: username, current_password: currentPassword },
-        document.getElementById("username-btn"), function (data) {
-          document.getElementById("account-username").textContent = data.username;
-          document.querySelector(".account-avatar").textContent = data.username.slice(0, 1).toUpperCase();
-          document.getElementById("username-password").value = "";
-          showSuccess("نام کاربری به «" + data.username + "» تغییر کرد");
-        });
-    });
 
     document.getElementById("password-form").addEventListener("submit", function (e) {
       e.preventDefault();
