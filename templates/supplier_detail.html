@@ -233,7 +233,7 @@
         '<td class="mono cell-quantity">' + escapeHtml(item.quantity) + "</td>" +
         '<td class="cell-unit"><span class="tag tag-success">' + escapeHtml(item.unit) + "</span></td>" +
         '<td class="cell-description">' + escapeHtml(item.description || "") + "</td>" +
-        '<td><button type="button" class="icon-btn danger" title="حذف" onclick="deleteProduct({{ item.id }})">' +
+        '<td><button type="button" class="icon-btn danger" title="حذف" onclick="deleteProduct(' + item.id + ')">' +
           '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button></td>'
       );
     }
