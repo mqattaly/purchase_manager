@@ -156,6 +156,27 @@ def normalize_name(name):
     return name.strip().lower()
 
 
+# ترتیب الفبای فارسی — چون مرتب‌سازی پیش‌فرض دیتابیس روی حروف فارسی درست نیست
+PERSIAN_ALPHABET = "آابپتثجچحخدذرزژسشصضطظعغفقکگلمنوهی"
+_PERSIAN_RANK = {ch: index for index, ch in enumerate(PERSIAN_ALPHABET)}
+
+
+def supplier_sort_key(name):
+    """کلید مرتب‌سازی نام‌ها بر اساس الفبای فارسی (لاتین و عدد بعد از آن)."""
+    cleaned = (name or "").replace("ي", "ی").replace("ك", "ک").replace("\u200c", " ").strip().lower()
+    key = []
+    for ch in cleaned:
+        if ch in _PERSIAN_RANK:
+            key.append((0, _PERSIAN_RANK[ch]))
+        elif ch.isspace():
+            key.append((1, 0))
+        elif ch.isdigit():
+            key.append((2, ord(ch)))
+        else:
+            key.append((3, ord(ch)))
+    return key
+
+
 def wants_json():
     return request.headers.get("X-Requested-With") == "fetch"
 
@@ -381,7 +402,8 @@ def user_suppliers():
     """All suppliers of the logged-in user, alphabetically."""
     if hasattr(g, "suppliers"):
         return g.suppliers
-    g.suppliers = Supplier.query.filter_by(owner_id=current_user.id).order_by(Supplier.name).all()
+    rows = Supplier.query.filter_by(owner_id=current_user.id).order_by(Supplier.name).all()
+    g.suppliers = sorted(rows, key=lambda s: supplier_sort_key(s.name))
     return g.suppliers
 
 
@@ -872,7 +894,19 @@ def check_duplicate():
 
 @app.route("/purchases")
 def purchases():
-    all_products = user_products(ordered=False).order_by(Product.id.desc()).all()
+    # اول بر اساس تأمین‌کننده گروه می‌شود، بعد داخل هر تأمین‌کننده به ترتیب ورود.
+    all_products = (
+        user_products(ordered=False)
+        .join(Supplier, Product.supplier_id == Supplier.id)
+        .order_by(Supplier.name.asc(), Product.id.asc())
+        .all()
+    )
+    all_products.sort(
+        key=lambda item: (
+            supplier_sort_key(item.supplier.name if item.supplier else ""),
+            item.id,
+        )
+    )
     return render_template("purchases.html", products=all_products, suppliers=user_suppliers())
 
 

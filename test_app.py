@@ -181,6 +181,42 @@ class ListiaTestCase(unittest.TestCase):
         self.assertEqual(stats["active_count"], 3)
         self.assertEqual(stats["archived_count"], 1)
 
+    def test_purchases_sorted_by_supplier_then_entry_order(self):
+        """لیست خریدها: اول گروه تأمین‌کننده، بعد ترتیب ورود محصول‌ها."""
+        self.register_and_login("smq2458", "adminpassword")
+
+        ids = {}
+        for name in ("ب تأمین دوم", "الف تأمین اول"):
+            res = self.client.post("/suppliers", data={"name": name}, headers={"X-Requested-With": "fetch"})
+            ids[name] = res.get_json()["id"]
+
+        # ثبت به‌صورت ضربدری تا ترتیب ورود با ترتیب تأمین‌کننده یکی نباشد
+        order = [
+            ("ب تأمین دوم", "ب-۱"),
+            ("الف تأمین اول", "الف-۱"),
+            ("ب تأمین دوم", "ب-۲"),
+            ("الف تأمین اول", "الف-۲"),
+        ]
+        for supplier_name, product in order:
+            self.client.post("/new-purchase", data={
+                "supplier": str(ids[supplier_name]),
+                "product": product,
+                "quantity": "1",
+                "unit": "عدد",
+                "description": "",
+            }, headers={"X-Requested-With": "fetch"})
+
+        html = self.client.get("/purchases").get_data(as_text=True)
+        body = html.split('id="purchases-body"', 1)[1]
+        positions = [(body.index(name), name) for _, name in order]
+        self.assertEqual(
+            [name for _, name in sorted(positions)],
+            ["الف-۱", "الف-۲", "ب-۱", "ب-۲"],
+        )
+        # هر گروه یک ردیف شروع دارد
+        rows_html = body.split("</table>", 1)[0]
+        self.assertEqual(rows_html.count('class="supplier-group-start"'), 2)
+
     def test_smq2458_admin_and_license_generator(self):
         self.register_and_login("smq2458", "adminpassword")
 

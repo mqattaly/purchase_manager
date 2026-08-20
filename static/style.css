@@ -596,6 +596,10 @@ table.data tr:last-child td { border-bottom: none; }
 table.data tbody tr:hover { background: var(--surface-muted); }
 table.data tbody tr[data-id], table.data tbody tr[data-key] { scroll-margin-top: 80px; }
 
+/* شروع گروه یک تأمین‌کننده در لیست خریدها — یک خط جداکننده‌ی ملایم */
+table.data tbody tr.supplier-group-start td { border-top: 1px solid var(--border); }
+table.data tbody tr.supplier-group-start:first-child td { border-top: none; }
+
 table.data tbody tr.row-link { cursor: pointer; }
 table.data tbody tr.row-link:hover { background: var(--teal-soft); }
 table.data tbody tr.search-row { cursor: pointer; }

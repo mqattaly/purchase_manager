@@ -26,6 +26,7 @@
         <tbody id="purchases-body">
           {% for item in products %}
           <tr data-id="{{ item.id }}"
+              {% if loop.first or loop.previtem.supplier.name != item.supplier.name %}class="supplier-group-start"{% endif %}
               data-supplier-id="{{ item.supplier_id }}"
               data-supplier-name="{{ item.supplier.name }}"
               data-product-name="{{ item.product_name }}"
@@ -78,6 +79,63 @@
       const remaining = document.querySelectorAll("#purchases-body tr").length;
       document.getElementById("purchases-card").style.display = remaining ? "block" : "none";
       document.getElementById("purchases-empty").style.display = remaining ? "none" : "block";
+      markSupplierGroups();
+    }
+
+    /* مرتب‌سازی: اول تأمین‌کننده (الفبای فارسی)، بعد ترتیب ورود (شناسه صعودی) */
+    const FA_ALPHABET = "آابپتثجچحخدذرزژسشصضطظعغفقکگلمنوهی";
+
+    function supplierSortKey(name) {
+      const cleaned = String(name || "")
+        .replace(/ي/g, "ی")
+        .replace(/ك/g, "ک")
+        .replace(/\u200c/g, " ")
+        .trim()
+        .toLowerCase();
+      const key = [];
+      for (const ch of cleaned) {
+        const index = FA_ALPHABET.indexOf(ch);
+        if (index >= 0) key.push([0, index]);
+        else if (/\s/.test(ch)) key.push([1, 0]);
+        else if (/[0-9۰-۹٠-٩]/.test(ch)) key.push([2, ch.codePointAt(0)]);
+        else key.push([3, ch.codePointAt(0)]);
+      }
+      return key;
+    }
+
+    function compareKeys(a, b) {
+      const len = Math.min(a.length, b.length);
+      for (let i = 0; i < len; i++) {
+        if (a[i][0] !== b[i][0]) return a[i][0] - b[i][0];
+        if (a[i][1] !== b[i][1]) return a[i][1] - b[i][1];
+      }
+      return a.length - b.length;
+    }
+
+    function comparePurchaseRows(a, b) {
+      const bySupplier = compareKeys(
+        supplierSortKey(a.dataset.supplierName),
+        supplierSortKey(b.dataset.supplierName)
+      );
+      if (bySupplier !== 0) return bySupplier;
+      return (parseInt(a.dataset.id, 10) || 0) - (parseInt(b.dataset.id, 10) || 0);
+    }
+
+    function markSupplierGroups() {
+      let previous = null;
+      document.querySelectorAll("#purchases-body tr").forEach(function (row) {
+        const name = row.dataset.supplierName || "";
+        row.classList.toggle("supplier-group-start", name !== previous);
+        previous = name;
+      });
+    }
+
+    function resortPurchases() {
+      const body = document.getElementById("purchases-body");
+      if (!body) return;
+      const rows = Array.prototype.slice.call(body.querySelectorAll("tr"));
+      rows.sort(comparePurchaseRows).forEach(function (row) { body.appendChild(row); });
+      markSupplierGroups();
     }
 
     function snapshotRow(row) {
@@ -230,6 +288,13 @@
         description: description
       });
 
+      // با تغییر تأمین‌کننده، ردیف باید به گروه تأمین‌کننده جدید منتقل شود.
+      if (String(prev.supplier_id) !== String(supplierId)) {
+        resortPurchases();
+        if (window.App && window.App.animateRow) window.App.animateRow(row);
+        row.scrollIntoView({ block: "nearest" });
+      }
+
       background("/product/" + id + "/edit", {
         headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "fetch" },
         body: new URLSearchParams({ product, quantity, unit, description, supplier_id: supplierId })
@@ -241,6 +306,7 @@
         row.dataset.unit = prev.unit;
         row.dataset.description = prev.description;
         paintPurchaseRow(row, prev);
+        resortPurchases();
         showError(msg || "ذخیره نشد");
       });
     }
