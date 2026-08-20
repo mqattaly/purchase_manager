@@ -31,8 +31,8 @@
         <span class="nav-label">منو</span>
 
         <a href="/" class="{{ 'active' if request.path == '/' }}">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
-          ثبت سریع
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          داشبورد
         </a>
 
         <a href="/purchases" class="{{ 'active' if request.path == '/purchases' }}">
@@ -78,15 +78,28 @@
               <span class="lic-icon">👑</span>
               <div class="lic-info">
                 <span class="lic-title" style="color:#FFE4A0;">حساب مدیر و توسعه‌دهنده</span>
-                <span class="lic-sub" style="color:#EBD4A8;">س.م.قتالی (نامحدود)</span>
+                <span class="lic-sub" style="color:#EBD4A8;">س.م.قتالی (دائمی)</span>
               </div>
+            </div>
+          {% elif limits.is_expired %}
+            <div class="sidebar-license trial" onclick="openLicenseModal()" role="button" tabindex="0" style="background:rgba(192,69,60,.14); border-color:rgba(192,69,60,.38);">
+              <div class="lic-top">
+                <span class="lic-badge" style="color:#FFB3AB;">⚠️ لایسنس منقضی شده</span>
+                <span class="lic-action-text" style="color:#FFB3AB;">تمدید ↗</span>
+              </div>
+              <div style="font-size:10.5px; color:#E1D0C4; margin-top:2px;">انقضا: {{ limits.expires_at_label }}</div>
             </div>
           {% elif limits.is_licensed %}
             <div class="sidebar-license licensed">
               <span class="lic-icon">💎</span>
               <div class="lic-info">
-                <span class="lic-title">نسخه کامل لیستیا</span>
-                <span class="lic-sub">لایسنس دائمی فعال</span>
+                {% if limits.is_lifetime %}
+                  <span class="lic-title">نسخه کامل لیستیا</span>
+                  <span class="lic-sub">لایسنس مادام‌العمر فعال</span>
+                {% else %}
+                  <span class="lic-title">نسخه نامحدود فعال</span>
+                  <span class="lic-sub">{{ limits.remaining_days }} روز مانده (تا {{ limits.expires_at_label }})</span>
+                {% endif %}
               </div>
             </div>
           {% else %}
@@ -165,7 +178,7 @@
         <div class="modal-title-group">
           <span class="modal-icon">🔑</span>
           <div>
-            <h2 class="modal-title">فعال‌سازی لایسنس لیستیا</h2>
+            <h2 class="modal-title">فعال‌سازی / تمدید لایسنس لیستیا</h2>
             <div class="modal-sub">حذف محدودیت ثبت تأمین‌کننده و کالا</div>
           </div>
         </div>
@@ -176,14 +189,22 @@
         <div class="license-info-card">
           <div class="license-info-row">
             <span class="lic-label">وضعیت حساب:</span>
-            {% if limits and limits.is_licensed %}
-              <span class="tag tag-success">✓ لایسنس فعال (نامحدود)</span>
+            {% if is_admin %}
+              <span class="tag tag-accent">👑 حساب مدیر و توسعه‌دهنده</span>
+            {% elif limits and limits.is_expired %}
+              <span class="tag" style="background:var(--danger-bg); color:var(--danger);">⚠️ منقضی شده (تا {{ limits.expires_at_label }})</span>
+            {% elif limits and limits.is_licensed %}
+              {% if limits.is_lifetime %}
+                <span class="tag tag-success">✓ لایسنس مادام‌العمر (دائمی)</span>
+              {% else %}
+                <span class="tag tag-success">✓ فعال ({{ limits.remaining_days }} روز مانده تا {{ limits.expires_at_label }})</span>
+              {% endif %}
             {% else %}
               <span class="tag tag-accent">نسخه آزمایشی (۱ تأمین‌کننده / ۵ محصول)</span>
             {% endif %}
           </div>
 
-          {% if limits and not limits.is_licensed %}
+          {% if limits and not limits.is_licensed and not is_admin %}
             <div class="license-quota-box">
               <div class="quota-item">
                 <span class="quota-name">تأمین‌کننده‌های ثبت‌شده:</span>
@@ -195,7 +216,7 @@
               </div>
             </div>
             <div class="license-notice">
-              💡 شما می‌توانید همیشه با این ۱ تأمین‌کننده و ۵ محصول فعلی کار کنید (سفارش‌گذاری، ویرایش و مدیریت). برای اضافه کردن تأمین‌کننده یا کالای بیشتر باید لایسنس تهیه نمایید.
+              💡 شما می‌توانید همیشه با این ۱ تأمین‌کننده و ۵ محصول فعلی کار کنید (سفارش‌گذاری، ویرایش و مدیریت). برای اضافه کردن تأمین‌کننده یا کالای بیشتر، لایسنس جدید فعال نمایید.
             </div>
           {% endif %}
         </div>
@@ -211,7 +232,7 @@
         <form id="modal-license-form" style="margin-top: 18px;" onsubmit="handleLicenseSubmit(event)">
           <div class="field-group">
             <label class="field-label" for="modal-license-key">کلید لایسنس دریافتی را اینجا وارد کنید:</label>
-            <input id="modal-license-key" class="field mono" placeholder="مثال: LST-XXXX-XXXX-XXXX-XXXX" required autocomplete="off" style="text-transform:uppercase;">
+            <input id="modal-license-key" class="field mono" placeholder="مثال: LST-30D-XXXX-XXXX-XXXX یا LST-LIFE-..." required autocomplete="off" style="text-transform:uppercase;">
           </div>
           <div id="modal-license-error" class="flash flash-error" style="display:none; margin-top:10px;"></div>
           <div id="modal-license-success" class="flash flash-success" style="display:none; margin-top:10px;"></div>

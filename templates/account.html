@@ -30,9 +30,15 @@
         </div>
         <div class="page-sub" style="margin-top:2px;">
           {% if is_admin %}
-            <span class="tag tag-accent">👑 حساب مالک سیستم (س.م.قتالی - نامحدود)</span>
+            <span class="tag tag-accent">👑 حساب مالک سیستم (س.م.قتالی - نامحدود دائمی)</span>
+          {% elif limits and limits.is_expired %}
+            <span class="tag" style="background:var(--danger-bg); color:var(--danger);">⚠️ لایسنس منقضی شده</span>
           {% elif limits and limits.is_licensed %}
-            <span class="tag tag-success">💎 نسخه نامحدود (لایسنس فعال)</span>
+            {% if limits.is_lifetime %}
+              <span class="tag tag-success">💎 نسخه نامحدود (مادام‌العمر)</span>
+            {% else %}
+              <span class="tag tag-success">💎 لایسنس فعال ({{ limits.remaining_days }} روز مانده تا {{ limits.expires_at_label }})</span>
+            {% endif %}
           {% else %}
             <span class="tag tag-accent">نسخه آزمایشی لیستیا</span>
           {% endif %}
@@ -74,7 +80,7 @@
         <div>
           <strong style="color:#7A5310; font-size:14.5px;">حساب کاربری مدیر سیستم و توسعه‌دهنده فعال است</strong>
           <div class="page-sub" style="margin-top:3px; color:var(--ink-soft);">
-            شما می‌توانید به صورت نامحدود محصول و تأمین‌کننده ثبت کنید و برای دیگر کاربران لایسنس جدید تولید نمایید.
+            شما می‌توانید به صورت نامحدود محصول و تأمین‌کننده ثبت کنید و برای دیگر کاربران لایسنس‌های مدت‌دار یا دائمی تولید نمایید.
           </div>
           <div style="margin-top:10px;">
             <a href="/admin/license-generator" class="btn btn-accent btn-sm">
@@ -84,11 +90,17 @@
           </div>
         </div>
       </div>
-    {% elif limits and limits.is_licensed %}
+    {% elif limits and limits.is_licensed and not limits.is_expired %}
       <div class="license-active-box">
         <div class="active-icon">💎</div>
         <div>
-          <strong style="color:var(--success); font-size:14.5px;">نسخه کامل و نامحدود لیستیا فعال است</strong>
+          <strong style="color:var(--success); font-size:14.5px;">
+            {% if limits.is_lifetime %}
+              نسخه کامل و نامحدود لیستیا فعال است (دائمی / مادام‌العمر)
+            {% else %}
+              لایسنس نسخه نامحدود فعال است ({{ limits.remaining_days }} روز باقی‌مانده تا {{ limits.expires_at_label }})
+            {% endif %}
+          </strong>
           <div class="page-sub" style="margin-top:3px;">
             محدودیت تعداد تأمین‌کننده و تعداد محصول برای شما برداشته شده است.
             {% if limits.license_key %}
@@ -98,9 +110,15 @@
         </div>
       </div>
     {% else %}
-      <div class="page-sub" style="margin-bottom:14px;">
-        شما در حال استفاده از <strong>نسخه آزمایشی لیستیا</strong> هستید. در این نسخه می‌توانید ۱ تأمین‌کننده و ۵ محصول ثبت کنید و نامحدود با آنها کار کنید. برای ثبت تأمین‌کنندگان و محصولات بیشتر، لایسنس را فعال کنید.
-      </div>
+      {% if limits and limits.is_expired %}
+        <div class="flash flash-error" style="display:flex; align-items:center; gap:8px; margin-bottom:14px;">
+          ⚠️ مدت زمان اعتبار لایسنس شما به پایان رسیده است. لطفاً برای ادامه استفاده نامحدود، کلید لایسنس جدید را وارد نمایید.
+        </div>
+      {% else %}
+        <div class="page-sub" style="margin-bottom:14px;">
+          شما در حال استفاده از <strong>نسخه آزمایشی لیستیا</strong> هستید. در این نسخه می‌توانید ۱ تأمین‌کننده و ۵ محصول ثبت کنید و نامحدود با آنها کار کنید. برای ثبت تأمین‌کنندگان و محصولات بیشتر، لایسنس را فعال کنید.
+        </div>
+      {% endif %}
 
       <div class="field-label">۱. شناسه فعال‌سازی شما (جهت دریافت کلید لایسنس ارسال فرمایید):</div>
       <div class="token-row" style="margin-bottom:16px;">
@@ -110,8 +128,8 @@
 
       <div class="field-label">۲. ثبت کلید لایسنس دریافتی:</div>
       <form id="license-form" class="field-row" style="align-items:flex-start;">
-        <input id="license-key-input" class="field mono" style="flex:1; min-width:240px; text-transform:uppercase;" placeholder="LST-XXXX-XXXX-XXXX-XXXX" autocomplete="off" required>
-        <button id="license-btn" type="submit" class="btn btn-accent">فعال‌سازی لایسنس</button>
+        <input id="license-key-input" class="field mono" style="flex:1; min-width:240px; text-transform:uppercase;" placeholder="مثال: LST-30D-XXXX-XXXX-XXXX یا LST-LIFE-..." autocomplete="off" required>
+        <button id="license-btn" type="submit" class="btn btn-accent">فعال‌سازی / تمدید لایسنس</button>
       </form>
       <div id="account-license-error" class="flash flash-error" style="display:none; margin-top:10px;"></div>
     {% endif %}

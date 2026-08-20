@@ -1,6 +1,6 @@
 import os
 import secrets
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -27,6 +27,7 @@ from licensing import (
     generate_key,
     generate_master_key,
     verify_key,
+    normalize_duration,
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -120,6 +121,7 @@ class User(UserMixin, db.Model):
     is_licensed = db.Column(db.Boolean, default=False)
     license_key = db.Column(db.String(100), nullable=True)
     licensed_at = db.Column(db.DateTime, nullable=True)
+    license_expires_at = db.Column(db.DateTime, nullable=True)  # تاریخ انقضای لایسنس (None = مادام‌العمر)
     license_type = db.Column(db.String(50), default="free")
     # دسترسی مدیریت و صدور لایسنس
     is_admin = db.Column(db.Boolean, default=False)
@@ -139,7 +141,7 @@ def is_admin_user(user=None):
 
 
 def get_user_limits(user=None):
-    """محاسبه وضعیت سهمیه و لایسنس کاربر"""
+    """محاسبه وضعیت سهمیه، مدت اعتبار و لایسنس کاربر"""
     if user is None:
         if current_user.is_authenticated:
             user = current_user
@@ -147,6 +149,8 @@ def get_user_limits(user=None):
             return {
                 "is_licensed": False,
                 "is_admin": False,
+                "is_expired": False,
+                "is_lifetime": False,
                 "user_code": "",
                 "supplier_count": 0,
                 "product_count": 0,
@@ -156,17 +160,47 @@ def get_user_limits(user=None):
                 "can_add_product": False,
                 "license_type": "free",
                 "licensed_at": None,
+                "license_expires_at": None,
+                "expires_at_label": None,
+                "remaining_days": None,
                 "license_key": None,
             }
 
     admin = is_admin_user(user)
     is_lic = bool(user.is_licensed or admin)
+    is_expired = False
+    is_lifetime = False
+    remaining_days = None
+    expires_label = None
+
+    if admin:
+        is_lic = True
+        is_lifetime = True
+    elif user.is_licensed:
+        if user.license_expires_at is None:
+            is_lifetime = True
+            is_lic = True
+        else:
+            now = datetime.now()
+            if user.license_expires_at > now:
+                is_lic = True
+                diff = user.license_expires_at - now
+                remaining_days = max(1, diff.days + (1 if diff.seconds > 0 else 0))
+                expires_label = shamsi_label(user.license_expires_at.date())
+            else:
+                is_lic = False
+                is_expired = True
+                remaining_days = 0
+                expires_label = shamsi_label(user.license_expires_at.date())
+
     s_count = Supplier.query.filter_by(owner_id=user.id).count()
     p_count = Product.query.filter_by(owner_id=user.id).count()
 
     return {
         "is_licensed": is_lic,
         "is_admin": admin,
+        "is_expired": is_expired,
+        "is_lifetime": is_lifetime,
         "user_code": get_user_code(user),
         "supplier_count": s_count,
         "product_count": p_count,
@@ -174,8 +208,11 @@ def get_user_limits(user=None):
         "max_products": None if is_lic else FREE_MAX_PRODUCTS,
         "can_add_supplier": is_lic or (s_count < FREE_MAX_SUPPLIERS),
         "can_add_product": is_lic or (p_count < FREE_MAX_PRODUCTS),
-        "license_type": user.license_type if is_lic else "free",
+        "license_type": user.license_type if is_lic else ("expired" if is_expired else "free"),
         "licensed_at": user.licensed_at,
+        "license_expires_at": user.license_expires_at,
+        "expires_at_label": expires_label,
+        "remaining_days": remaining_days,
         "license_key": user.license_key,
     }
 
@@ -359,6 +396,11 @@ def ensure_schema():
                     conn.execute(text('ALTER TABLE "user" ADD COLUMN licensed_at TIMESTAMP'))
                 except Exception:
                     pass
+            if "license_expires_at" not in user_cols:
+                try:
+                    conn.execute(text('ALTER TABLE "user" ADD COLUMN license_expires_at TIMESTAMP'))
+                except Exception:
+                    pass
             if "license_type" not in user_cols:
                 try:
                     conn.execute(text('ALTER TABLE "user" ADD COLUMN license_type VARCHAR(50) DEFAULT \'free\''))
@@ -391,7 +433,6 @@ def ensure_schema():
             except Exception:
                 pass
 
-        # ارتقای خودکار کاربر smq2458 به عنوان مدیر و دارای لایسنس کامل
         try:
             conn.execute(
                 text(
@@ -580,6 +621,8 @@ def new_purchase():
     if request.method == "POST":
         if not limits["can_add_product"]:
             msg = "سقف نسخه آزمایشی (۵ محصول) تکمیل شده است. برای ثبت محصول جدید باید لایسنس لیستیا را تهیه کنید."
+            if limits.get("is_expired"):
+                msg = "مدت زمان لایسنس شما به پایان رسیده است. جهت ثبت محصولات بیشتر، لایسنس خود را تمدید فرمایید."
             if wants_json():
                 return json_error(msg, 403, {"license_locked": True})
             return render_template(
@@ -792,6 +835,8 @@ def suppliers():
     if request.method == "POST":
         if not limits["can_add_supplier"]:
             msg = "سقف نسخه آزمایشی (۱ تأمین‌کننده) تکمیل شده است. برای ثبت تأمین‌کنندگان بیشتر باید لایسنس لیستیا را تهیه کنید."
+            if limits.get("is_expired"):
+                msg = "مدت زمان لایسنس شما به پایان رسیده است. جهت ثبت تأمین‌کنندگان بیشتر، لایسنس خود را تمدید فرمایید."
             if wants_json():
                 return json_error(msg, 403, {"license_locked": True})
             return render_template("suppliers.html", suppliers=user_suppliers(), error=msg, limits=limits)
@@ -1254,12 +1299,12 @@ def api_license_status():
 
 @app.route("/account/license", methods=["POST"])
 def activate_license():
-    """فعال‌سازی کلید لایسنس برای حساب کاربر جاری"""
+    """فعال‌سازی کلید لایسنس (مدت‌دار یا مادام‌العمر) برای حساب کاربر جاری"""
     key = request.form.get("license_key", "").strip()
     if not key:
         return json_error("لطفاً کلید لایسنس را وارد کنید.")
 
-    is_valid, tier, msg = verify_key(current_user, key)
+    is_valid, tier, days, msg = verify_key(current_user, key)
     if not is_valid:
         return json_error(msg, 400)
 
@@ -1268,13 +1313,23 @@ def activate_license():
     user.license_key = key.strip().upper()
     user.licensed_at = datetime.now()
     user.license_type = tier or "pro"
+
+    if days:
+        user.license_expires_at = datetime.now() + timedelta(days=days)
+        validity_text = f"اعتبار به مدت {days} روز (تا {shamsi_label(user.license_expires_at.date())})"
+    else:
+        user.license_expires_at = None
+        validity_text = "اعتبار مادام‌العمر (دائمی)"
+
     db.session.commit()
 
     return {
         "success": True,
-        "message": "✓ لایسنس با موفقیت فعال شد! محدودیت‌ها برای همیشه حذف شدند.",
+        "message": f"✓ لایسنس با موفقیت فعال شد! {validity_text}",
         "license_type": user.license_type,
         "is_licensed": True,
+        "expires_at": user.license_expires_at.isoformat() if user.license_expires_at else None,
+        "validity_text": validity_text,
     }
 
 
@@ -1296,6 +1351,10 @@ def admin_license_generator():
             "username": u.username,
             "user_code": user_limits["user_code"],
             "is_licensed": user_limits["is_licensed"],
+            "is_expired": user_limits["is_expired"],
+            "is_lifetime": user_limits["is_lifetime"],
+            "remaining_days": user_limits["remaining_days"],
+            "expires_at_label": user_limits["expires_at_label"],
             "supplier_count": user_limits["supplier_count"],
             "product_count": user_limits["product_count"],
             "license_type": u.license_type,
@@ -1312,22 +1371,27 @@ def api_admin_generate_license():
 
     ident = request.form.get("identifier", "").strip()
     tier = request.form.get("tier", "PRO").strip().upper()
+    duration = request.form.get("duration", "LIFE").strip()
     is_master = request.form.get("is_master") in ["true", "1", "on"]
 
+    period_code, days, duration_label = normalize_duration(duration)
+    validity_desc = "مادام‌العمر (دائمی)" if days is None else f"{days} روز پس از فعال‌سازی"
+
     if is_master:
-        key = generate_master_key(tier)
+        key = generate_master_key(tier, period_code)
         ident_display = "کلید سراسری (Universal Master Key)"
         code_display = "همه دستگاه‌ها و حساب‌ها"
     else:
         if not ident:
             return json_error("نام کاربری یا شناسه فعال‌سازی مشتری را وارد کنید.")
-        key = generate_key(ident, tier)
+        key = generate_key(ident, tier, period_code)
         ident_display = ident
         code_display = get_user_code(ident)
 
     customer_msg = (
-        f"با سلام، لایسنس نسخه نامحدود «لیستیا» برای شما فعال شد:\n\n"
+        f"با سلام، لایسنس نسخه نامحدود «لیستیا» ({duration_label}) برای شما صادر شد:\n\n"
         f"🔑 کلید لایسنس شما:\n{key}\n\n"
+        f"⏳ مدت اعتبار: {validity_desc}\n"
         f"روش فعال‌سازی: وارد نرم‌افزار شوید، روی «نسخه آزمایشی» در منو کلیک کنید و کلید بالا را وارد نمایید.\n"
         f"با آرزوی موفقیت · طراحی و توسعه: س.م.قتالی"
     )
@@ -1338,6 +1402,9 @@ def api_admin_generate_license():
         "identifier": ident_display,
         "user_code": code_display,
         "tier": tier,
+        "duration": period_code,
+        "duration_label": duration_label,
+        "validity_desc": validity_desc,
         "customer_message": customer_msg,
     }
 
