@@ -556,7 +556,7 @@ label.field-label,
 /* ============================== 5. tables ============================== */
 
 .table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-.table-scroll table.data { min-width: 600px; }
+.table-scroll table.data { min-width: 100%; }
 
 table.data { width: 100%; border-collapse: collapse; }
 
@@ -564,21 +564,23 @@ table.data th {
   text-align: right;
   font-size: 11px; font-weight: 600; letter-spacing: .2px;
   color: var(--ink-faint);
-  padding: 11px 14px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--border);
   background: var(--surface-muted);
   text-transform: none;
+  white-space: nowrap;
 }
 
 table.data thead th:first-child { border-top-right-radius: var(--radius-lg); }
 table.data thead th:last-child { border-top-left-radius: var(--radius-lg); }
 
 table.data td {
-  padding: 12px 14px;
-  font-size: 13.5px;
+  padding: 10px 12px;
+  font-size: 13px;
   border-bottom: 1px solid var(--border-soft);
   color: var(--ink);
   transition: background var(--fast);
+  vertical-align: middle;
 }
 
 table.data tr:last-child td { border-bottom: none; }
@@ -596,7 +598,69 @@ table.data tbody tr.row-highlight td {
   animation: highlightFade 2.8s ease 1.6s forwards;
 }
 
-td.cell-actions, th.col-actions { white-space: nowrap; text-align: left; width: 1%; }
+/* ستون‌های پویا و فشرده برای نام محصول و توضیحات */
+.cell-product {
+  max-width: 220px;
+  min-width: 110px;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+.cell-supplier {
+  max-width: 150px;
+  min-width: 90px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cell-description {
+  max-width: 180px;
+  min-width: 80px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.4;
+  cursor: default;
+  transition: max-width var(--med), white-space var(--med);
+}
+
+.cell-description:hover,
+.cell-description:focus-within,
+.cell-description.expanded {
+  white-space: normal;
+  max-width: 320px;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.cell-quantity, .col-quantity {
+  width: 1%;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.cell-unit, .col-unit {
+  width: 1%;
+  white-space: nowrap;
+  text-align: center;
+}
+
+td.cell-order, th.col-order {
+  width: 44px;
+  padding-left: 2px;
+  padding-right: 8px;
+  text-align: center;
+}
+
+td.cell-actions, th.col-actions {
+  width: 1%;
+  white-space: nowrap;
+  text-align: left;
+  padding-left: 8px;
+  padding-right: 4px;
+}
 td.cell-actions .icon-btn + .icon-btn { margin-right: 2px; }
 
 mark { background: #F6D27A; color: inherit; padding: 0 2px; border-radius: 3px; }
@@ -1350,17 +1414,58 @@ tr.row-out { animation: rowOut .16s var(--ease) both; }
   .nav a.active::before { display: none; }
   .nav a:hover { transform: none; }
 
-  main.content { padding: 18px 16px 56px; }
-  .global-search { width: 100%; margin-bottom: 22px; }
+  main.content { padding: 16px 12px 56px; }
+  .global-search { width: 100%; margin-bottom: 20px; }
   .global-search-shortcut { display: none; }
-  .global-search-form { height: 48px; }
+  .global-search-form { height: 46px; }
   .global-search-panel { position: fixed; top: 74px; right: 12px; left: 12px; max-height: calc(100vh - 88px); }
   .global-search-results { max-height: calc(100vh - 205px); }
-  .page-head { align-items: flex-start; }
+  .page-head { align-items: flex-start; margin-bottom: 16px; }
+  .page-title { font-size: 20px; }
   .qa-form { grid-template-columns: 1fr 1fr; }
   .qa-supplier, .qa-product, .qa-quantity, .qa-unit, .qa-description, .qa-submit { grid-column: span 2; }
   .supplier-card-grid { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); }
-  table.data { min-width: 560px; }
+  
+  table.data th, table.data td {
+    padding: 8px 6px;
+    font-size: 12px;
+  }
+  .cell-product {
+    max-width: 140px;
+    min-width: 85px;
+    font-size: 12px;
+  }
+  .cell-supplier {
+    max-width: 95px;
+    min-width: 65px;
+    font-size: 11.5px;
+  }
+  .cell-description {
+    max-width: 100px;
+    min-width: 55px;
+    font-size: 11.5px;
+  }
+  .cell-description:hover,
+  .cell-description:focus-within,
+  .cell-description.expanded {
+    max-width: 200px;
+  }
+  .tag {
+    padding: 2px 6px;
+    font-size: 10.5px;
+  }
+  .order-check {
+    width: 22px;
+    height: 22px;
+  }
+  .icon-btn {
+    width: 28px;
+    height: 28px;
+    font-size: 13px;
+  }
+  .table-scroll table.data {
+    min-width: 440px;
+  }
   .toast-wrap { left: 12px; right: 12px; bottom: 12px; }
   .toast { max-width: none; }
 }
