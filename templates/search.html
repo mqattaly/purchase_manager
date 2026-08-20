@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}جستجوی محصول{% endblock %}
+{% block title %}جستجوی محصول · لیستیا{% endblock %}
 
 {% block content %}
 
   <div class="page-head">
     <div>
-      <h1 class="page-title">🔍 جستجوی محصول</h1>
-      <div class="page-sub">همین‌طور که تایپ می‌کنی، بین کالاهای خودت می‌گردد</div>
+      <h1 class="page-title">🔍 جستجوی محصول در لیستیا</h1>
+      <div class="page-sub">جستجوی هوشمند در کالاها و تأمین‌کنندگان</div>
     </div>
   </div>
 
@@ -30,101 +30,66 @@
   </div>
 
   <script>
-    let debounceTimer = null;
-    let activeRequest = null;
-    const input = document.getElementById("search-input");
+    const searchInput = document.getElementById("search-input");
+    const resultsCard = document.getElementById("results-card");
+    const resultsBody = document.getElementById("results-body");
+    const searchStatus = document.getElementById("search-status");
 
-    input.addEventListener("input", function () {
-      scheduleSearch(input.value);
-    });
+    let timer = null;
 
-    if (input.value.trim()) scheduleSearch(input.value);
-
-    function scheduleSearch(raw) {
-      clearTimeout(debounceTimer);
-      const q = raw.trim();
-
+    function doSearch(q) {
+      q = (q || "").trim();
       if (q.length < 2) {
-        if (activeRequest) activeRequest.abort();
-        document.getElementById("results-card").style.display = "none";
-        document.getElementById("search-status").textContent = q.length === 1 ? "حداقل ۲ حرف تایپ کن..." : "";
+        resultsCard.style.display = "none";
+        resultsBody.innerHTML = "";
+        searchStatus.textContent = q.length === 1 ? "برای جستجو حداقل ۲ حرف بنویسید" : "";
         return;
       }
 
-      document.getElementById("search-status").textContent = "در حال جستجو...";
-      debounceTimer = setTimeout(function () { runSearch(q); }, 140);
-    }
+      searchStatus.textContent = "در حال جستجو...";
 
-    function runSearch(q) {
-      if (activeRequest) activeRequest.abort();
-      const controller = new AbortController();
-      activeRequest = controller;
+      App.request("/api/search?q=" + encodeURIComponent(q))
+        .then(function (result) {
+          if (!result.ok) {
+            searchStatus.textContent = "خطا در دریافت نتایج";
+            return;
+          }
 
-      fetch("/api/search?q=" + encodeURIComponent(q), { signal: controller.signal })
-        .then(function (res) { return res.json(); })
-        .then(function (data) {
-          if (input.value.trim() !== q) return;
-          renderResults(data.results || [], q);
+          const products = result.data.results || [];
+          if (products.length === 0) {
+            searchStatus.textContent = "نتیجه‌ای یافت نشد.";
+            resultsCard.style.display = "none";
+            resultsBody.innerHTML = "";
+            return;
+          }
+
+          searchStatus.textContent = products.length + " محصول پیدا شد:";
+          resultsBody.innerHTML = products.map(function (p) {
+            return (
+              '<tr class="search-row" onclick="location.href=\'/supplier/' + p.supplier_id + '?highlight=' + p.id + '\'">' +
+                '<td>' + escapeHtml(p.supplier_name) + '</td>' +
+                '<td><strong>' + escapeHtml(p.product_name) + '</strong></td>' +
+                '<td class="mono">' + escapeHtml(p.quantity) + '</td>' +
+                '<td><span class="tag">' + escapeHtml(p.unit) + '</span></td>' +
+                '<td>' + (p.ordered ? '<span class="tag tag-success">آرشیو (' + escapeHtml(p.ordered_date_label || '') + ')</span>' : '<span class="tag tag-accent">فعال</span>') + '</td>' +
+              '</tr>'
+            );
+          }).join("");
+          resultsCard.style.display = "block";
         })
-        .catch(function (err) {
-          if (err && err.name === "AbortError") return;
-          document.getElementById("search-status").textContent = "خطا در جستجو";
+        .catch(function () {
+          searchStatus.textContent = "خطا در ارتباط با سرور";
         });
     }
 
-    function renderResults(results, q) {
-      const body = document.getElementById("results-body");
-      const card = document.getElementById("results-card");
-      const status = document.getElementById("search-status");
-
-      if (results.length === 0) {
-        card.style.display = "none";
-        status.textContent = "چیزی برای «" + q + "» پیدا نشد.";
-        return;
-      }
-
-      status.textContent = results.length + " نتیجه پیدا شد — روی ردیف بزن تا همان کالا هایلایت شود";
-      card.style.display = "block";
-
-      body.innerHTML = results.map(function (r) {
-        const statusTag = r.ordered
-          ? '<span class="tag tag-success">آرشیو · ' + escapeHtml(r.ordered_date_label || "") + "</span>"
-          : '<span class="tag tag-accent">فعال</span>';
-
-        return (
-          '<tr class="search-row" tabindex="0" data-href="/supplier/' + r.supplier_id + "?highlight=" + r.id + '">' +
-          "<td>" + escapeHtml(r.supplier_name) + "</td>" +
-          "<td>" + highlightMatch(r.product_name, q) + "</td>" +
-          '<td class="mono">' + escapeHtml(r.quantity) + "</td>" +
-          "<td><span class='tag'>" + escapeHtml(r.unit) + "</span></td>" +
-          "<td>" + statusTag + "</td>" +
-          "</tr>"
-        );
-      }).join("");
-    }
-
-    document.getElementById("results-body").addEventListener("click", function (event) {
-      const row = event.target.closest("tr.search-row");
-      if (row && row.dataset.href) window.location.href = row.dataset.href;
+    searchInput.addEventListener("input", function () {
+      clearTimeout(timer);
+      timer = setTimeout(function () { doSearch(searchInput.value); }, 200);
     });
 
-    document.getElementById("results-body").addEventListener("keydown", function (event) {
-      if (event.key !== "Enter") return;
-      const row = event.target.closest("tr.search-row");
-      if (row && row.dataset.href) window.location.href = row.dataset.href;
-    });
-
-    function highlightMatch(text, q) {
-      const src = text == null ? "" : String(text);
-      const idx = src.toLowerCase().indexOf(q.toLowerCase());
-      if (idx < 0) return escapeHtml(src);
-      return (
-        escapeHtml(src.slice(0, idx)) +
-        "<mark>" + escapeHtml(src.slice(idx, idx + q.length)) + "</mark>" +
-        escapeHtml(src.slice(idx + q.length))
-      );
+    if (searchInput.value.trim().length >= 2) {
+      doSearch(searchInput.value);
     }
-
   </script>
 
 {% endblock %}

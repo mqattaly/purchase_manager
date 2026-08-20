@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ supplier.name }}{% endblock %}
+{% block title %}{{ supplier.name }} · لیستیا{% endblock %}
 
 {% block content %}
 
@@ -23,12 +23,13 @@
         <th>تعداد</th>
         <th>نوع تعداد</th>
         <th>توضیحات</th>
-        <th></th>
-        <th></th>
+        <th class="col-actions"></th>
+        <th class="col-actions"></th>
       </tr>
       <tbody id="active-body">
         {% for item in products %}
         <tr data-id="{{ item.id }}"
+            data-supplier-id="{{ item.supplier_id }}"
             data-product-name="{{ item.product_name }}"
             data-quantity="{{ item.quantity }}"
             data-unit="{{ item.unit }}"
@@ -127,17 +128,20 @@
 
   <script>
     const SUPPLIER_ID = {{ supplier.id }};
+    const ALL_SUPPLIERS = [
+      {% for s in suppliers %}
+        { id: {{ s.id }}, name: {{ s.name|tojson }} }{% if not loop.last %},{% endif %}
+      {% endfor %}
+    ];
     const TODAY_ISO = {{ today_iso|tojson }};
     const TODAY_LABEL = {{ today_label|tojson }};
     const HIGHLIGHT_ID = {{ highlight_id|tojson }};
     const UNITS = ["عدد", "کارتن", "بسته", "گونی", "کیلو"];
 
-
-
-
     function itemFromRow(row) {
       return {
         id: Number(row.dataset.id),
+        supplier_id: Number(row.dataset.supplierId || SUPPLIER_ID),
         product_name: row.dataset.productName || "",
         quantity: row.dataset.quantity || "",
         unit: row.dataset.unit || "",
@@ -147,19 +151,13 @@
 
     function setRowData(row, item) {
       row.dataset.id = item.id;
+      row.dataset.supplierId = item.supplier_id || SUPPLIER_ID;
       row.dataset.productName = item.product_name || "";
       row.dataset.quantity = item.quantity || "";
       row.dataset.unit = item.unit || "";
       row.dataset.description = item.description || "";
     }
 
-
-    /**
-     * ردیف را سر جای خودش در لیست فعال می‌گذارد.
-     * لیست فعال بر اساس شناسه‌ی نزولی مرتب است، پس ردیف قبل از اولین
-     * ردیفی می‌نشیند که شناسه‌اش کوچک‌تر است — دقیقاً همان‌جایی که بعد از
-     * رفرش صفحه هم دیده می‌شود.
-     */
     function insertActiveRow(row) {
       const body = document.getElementById("active-body");
       const id = Number(row.dataset.id);
@@ -170,7 +168,7 @@
         if (Number(existing.dataset.id) < id) target = existing;
       });
 
-      body.insertBefore(row, target);   // target = null یعنی انتهای لیست
+      body.insertBefore(row, target);
     }
 
     function flashRow(row) {
@@ -235,7 +233,7 @@
         '<td class="mono cell-quantity">' + escapeHtml(item.quantity) + "</td>" +
         '<td class="cell-unit"><span class="tag tag-success">' + escapeHtml(item.unit) + "</span></td>" +
         '<td class="cell-description">' + escapeHtml(item.description || "") + "</td>" +
-        '<td><button type="button" class="icon-btn danger" title="حذف" onclick="deleteProduct(' + item.id + ')">' +
+        '<td><button type="button" class="icon-btn danger" title="حذف" onclick="deleteProduct({{ item.id }})">' +
           '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button></td>'
       );
     }
@@ -285,7 +283,6 @@
         box.setAttribute("aria-pressed", "true");
       }
 
-      // let the green tick be visible for a moment before the row moves to the archive
       setTimeout(function () { commitOrder(id, row); }, 420);
     }
 
@@ -325,7 +322,6 @@
         box.setAttribute("aria-pressed", "false");
       }
 
-      // show the tick clearing, then move the row back to the active list
       setTimeout(function () { commitUnarchive(id, row); }, 320);
     }
 
@@ -402,15 +398,25 @@
       if (!row || row.classList.contains("editing")) return;
       row.classList.add("editing");
       const item = itemFromRow(row);
-      row.querySelector(".cell-product").innerHTML = '<input class="field" style="height:34px; width:150px;" value="' + escapeAttr(item.product_name) + '">';
-      row.querySelector(".cell-quantity").innerHTML = '<input class="field mono" style="height:34px; width:80px;" type="number" value="' + escapeAttr(item.quantity) + '">';
+
+      row.querySelector(".cell-product").innerHTML =
+        '<div style="display:flex; flex-direction:column; gap:4px;">' +
+          '<select class="field field-sm supplier-select" style="width:140px; margin-bottom:3px;">' +
+            ALL_SUPPLIERS.map(function (s) {
+              return '<option value="' + s.id + '"' + (s.id === SUPPLIER_ID ? ' selected' : '') + '>' + escapeHtml(s.name) + '</option>';
+            }).join("") +
+          '</select>' +
+          '<input class="field" style="height:34px; width:150px;" value="' + escapeAttr(item.product_name) + '">' +
+        '</div>';
+
+      row.querySelector(".cell-quantity").innerHTML = '<input class="field mono" style="height:34px; width:75px;" type="number" value="' + escapeAttr(item.quantity) + '">';
       row.querySelector(".cell-unit").innerHTML =
-        '<select class="field" style="height:34px; width:100px;">' +
+        '<select class="field" style="height:34px; width:95px;">' +
         UNITS.map(function (u) {
           return '<option value="' + u + '"' + (u === item.unit ? " selected" : "") + ">" + u + "</option>";
         }).join("") +
         "</select>";
-      row.querySelector(".cell-description").innerHTML = '<input class="field" style="height:34px; width:170px;" value="' + escapeAttr(item.description) + '">';
+      row.querySelector(".cell-description").innerHTML = '<input class="field" style="height:34px; width:150px;" value="' + escapeAttr(item.description) + '">';
       const cells = row.querySelectorAll("td");
       cells[5].innerHTML = '<button type="button" class="icon-btn" onclick="saveEdit(' + id + ')" title="ذخیره">' +
         '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></button>';
@@ -427,6 +433,8 @@
 
     function saveEdit(id) {
       const row = document.querySelector('#active-body tr[data-id="' + id + '"]');
+      const supplierSelect = row.querySelector(".supplier-select");
+      const targetSupplierId = supplierSelect ? Number(supplierSelect.value) : SUPPLIER_ID;
       const product = row.querySelector(".cell-product input").value.trim();
       const quantity = row.querySelector(".cell-quantity input").value.trim();
       const unit = row.querySelector(".cell-unit select").value;
@@ -437,17 +445,27 @@
       }
 
       const prev = itemFromRow(row);
-      const next = { id: id, product_name: product, quantity: quantity, unit: unit, description: description };
-      setRowData(row, next);
-      row.classList.remove("editing");
-      row.innerHTML = activeRowHtml(next);
+      const next = { id: id, supplier_id: targetSupplierId, product_name: product, quantity: quantity, unit: unit, description: description };
+
+      if (targetSupplierId !== SUPPLIER_ID) {
+        row.remove();
+        syncActiveEmpty();
+      } else {
+        setRowData(row, next);
+        row.classList.remove("editing");
+        row.innerHTML = activeRowHtml(next);
+      }
 
       background("/product/" + id + "/edit", {
         headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "fetch" },
-        body: new URLSearchParams({ product, quantity, unit, description })
+        body: new URLSearchParams({ product, quantity, unit, description, supplier_id: targetSupplierId })
       }, function (msg) {
-        setRowData(row, prev);
-        row.innerHTML = activeRowHtml(prev);
+        if (targetSupplierId !== SUPPLIER_ID) {
+          window.location.reload();
+        } else {
+          setRowData(row, prev);
+          row.innerHTML = activeRowHtml(prev);
+        }
         showError(msg || "ذخیره نشد");
       });
     }

@@ -1,22 +1,54 @@
 {% extends "base.html" %}
-{% block title %}تأمین‌کننده‌ها{% endblock %}
+{% block title %}تأمین‌کننده‌ها · لیستیا{% endblock %}
 
 {% block content %}
 
   <div class="page-head">
     <div>
       <h1 class="page-title">🏭 تأمین‌کننده‌ها</h1>
-      <div class="page-sub">افزودن، ویرایش و مشاهده هر تأمین‌کننده</div>
+      <div class="page-sub">افزودن، ویرایش و مشاهده تأمین‌کنندگان در لیستیا</div>
     </div>
   </div>
 
+  {% if limits and not limits.can_add_supplier %}
+    <div class="card card-pad license-lock-banner" style="margin-bottom:22px;">
+      <div class="license-lock-icon">🔒</div>
+      <div class="license-lock-content">
+        <div class="license-lock-title">سقف تأمین‌کننده در نسخه آزمایشی تکمیل است (۱ از ۱)</div>
+        <div class="license-lock-text">
+          ثبت تأمین‌کننده جدید قفل شده است. شما می‌توانید تأمین‌کننده موجود را مدیریت، ویرایش و مشاهده کنید. برای افزودن تأمین‌کنندگان جدید، لایسنس نامحدود لیستیا را فعال فرمایید.
+        </div>
+      </div>
+      <button type="button" class="btn btn-accent btn-sm" onclick="openLicenseModal()">فعال‌سازی لایسنس</button>
+    </div>
+  {% endif %}
 
   <div class="card card-pad" style="margin-bottom:22px;">
     <form id="add-supplier-form" class="field-row">
-      <input id="supplier-name" name="name" class="field" style="flex:1; max-width:320px" placeholder="نام تأمین‌کننده جدید" autocomplete="off" required>
-      <button id="add-supplier-btn" type="submit" class="btn btn-accent">
-        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>
-        افزودن
+      <input
+        id="supplier-name"
+        name="name"
+        class="field"
+        style="flex:1; max-width:320px"
+        placeholder="نام تأمین‌کننده جدید"
+        autocomplete="off"
+        required
+        {{ 'disabled' if (limits and not limits.can_add_supplier) else '' }}
+      >
+      <button
+        id="add-supplier-btn"
+        type="submit"
+        class="btn btn-accent"
+        {{ 'disabled' if (limits and not limits.can_add_supplier) else '' }}
+        title="{{ 'برای ثبت تأمین‌کننده بیشتر لایسنس تهیه کنید' if (limits and not limits.can_add_supplier) else 'افزودن تأمین‌کننده' }}"
+      >
+        {% if limits and not limits.can_add_supplier %}
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          قفل لایسنس
+        {% else %}
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg>
+          افزودن
+        {% endif %}
       </button>
     </form>
   </div>
@@ -47,6 +79,11 @@
       e.preventDefault();
 
       const input = document.getElementById("supplier-name");
+      if (input.disabled) {
+        openLicenseModal();
+        return;
+      }
+
       const name = input.value.trim();
       if (!name) return;
 
@@ -57,7 +94,11 @@
         .then(function (result) {
           btn.disabled = false;
           if (!result.ok) {
-            showError((result.data && result.data.message) || "ثبت نشد");
+            const msg = (result.data && result.data.message) || "ثبت نشد";
+            showError(msg);
+            if (result.status === 403 || (result.data && result.data.license_locked)) {
+              openLicenseModal();
+            }
             return;
           }
           showSuccess("تأمین‌کننده اضافه شد");
@@ -188,12 +229,9 @@
         });
     }
 
-
-
-
-
     window.addEventListener("load", function () {
-      document.getElementById("supplier-name").focus();
+      const inp = document.getElementById("supplier-name");
+      if (inp && !inp.disabled) inp.focus();
     });
   </script>
 

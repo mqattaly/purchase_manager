@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#142430">
-  <title>{{ 'ثبت‌نام' if mode == 'signup' else 'ورود' }} · مدیریت خرید</title>
+  <title>{{ 'ثبت‌نام در لیستیا' if mode == 'signup' else 'ورود به لیستیا' }} · لیستیا</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -14,7 +14,7 @@
   <style>
     .login-shell {
       min-height: 100vh;
-      display: flex; align-items: center; justify-content: center;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
       background:
         radial-gradient(900px 420px at 20% -10%, rgba(224,160,48,.18), transparent 60%),
         radial-gradient(700px 380px at 90% 110%, rgba(47,111,118,.28), transparent 60%),
@@ -22,25 +22,25 @@
       padding: 20px;
     }
     .login-card {
-      width: 100%; max-width: 348px;
+      width: 100%; max-width: 360px;
       background: var(--surface);
       border-radius: var(--radius-lg);
       box-shadow: var(--shadow-pop);
-      padding: 30px 26px;
+      padding: 32px 28px;
       animation: fadeUp .34s var(--ease) both;
     }
-    .login-brand { display: flex; align-items: center; gap: 11px; margin-bottom: 6px; }
+    .login-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
     .login-brand-mark {
-      width: 38px; height: 38px; border-radius: 11px;
+      width: 42px; height: 42px; border-radius: 12px;
       background: linear-gradient(150deg, #E8AE43, var(--accent));
       display: flex; align-items: center; justify-content: center;
-      font-weight: 800; color: var(--accent-ink);
+      font-weight: 800; font-size: 20px; color: var(--accent-ink);
       box-shadow: 0 6px 16px rgba(224,160,48,.3);
     }
-    .login-brand-title { font-weight: 700; font-size: 15.5px; }
+    .login-brand-title { font-weight: 800; font-size: 18px; color: var(--ink); }
     .login-tagline { font-size: 12.5px; color: var(--ink-soft); margin: 0 0 20px; }
     .login-field {
-      width: 100%; height: 46px; margin-bottom: 11px;
+      width: 100%; height: 46px; margin-bottom: 12px;
       border: 1px solid var(--border);
       border-radius: var(--radius-sm);
       padding: 0 14px;
@@ -71,35 +71,42 @@
       font-size: 12px; padding: 9px 12px;
       border-radius: var(--radius-sm); margin-bottom: 14px;
     }
-    .login-switch { text-align: center; margin-top: 16px; font-size: 12.5px; color: var(--ink-soft); }
+    .login-switch { text-align: center; margin-top: 18px; font-size: 12.5px; color: var(--ink-soft); }
     .login-switch a { color: var(--teal); font-weight: 600; text-decoration: none; }
     .login-switch a:hover { text-decoration: underline; }
+    .login-credit {
+      margin-top: 20px;
+      text-align: center;
+      font-size: 12px;
+      color: rgba(255,255,255,.55);
+      font-family: var(--font-body);
+    }
   </style>
 </head>
 <body>
   <div class="login-shell">
     <div class="login-card">
       <div class="login-brand">
-        <div class="login-brand-mark">خ</div>
-        <div class="login-brand-title">
-          {% if mode == 'signup' %}ساخت حساب جدید{% else %}مدیریت خرید{% endif %}
+        <div class="login-brand-mark">ل</div>
+        <div>
+          <div class="login-brand-title">لیستیا</div>
         </div>
       </div>
-      <p class="login-tagline">لیست خرید فروشگاه، سریع و بدون معطلی</p>
+      <p class="login-tagline">سامانه مدیریت سفارش و خرید فروشگاه</p>
 
       {% if error %}
         <div class="login-error">{{ error }}</div>
       {% endif %}
 
       {% if mode == 'signup' %}
-        <div class="login-hint">حسابت خالی است — تأمین‌کننده و کالاهای بقیه کاربران را نمی‌بینی.</div>
+        <div class="login-hint">حساب جدید آزمایشی: شامل ۱ تأمین‌کننده و ۵ محصول برای شروع سریع.</div>
         <form method="POST" action="/signup">
           <input class="login-field" name="username" placeholder="نام کاربری" autocomplete="username" required autofocus>
           <input class="login-field" name="password" type="password" placeholder="رمز عبور" autocomplete="new-password" required>
-          <button type="submit" class="login-btn signup">ساخت حساب</button>
+          <button type="submit" class="login-btn signup">ساخت حساب کاربری</button>
         </form>
         <div class="login-switch">
-          قبلاً حساب ساختی؟ <a href="/login">وارد شو</a>
+          قبلاً حساب ساختی؟ <a href="/login">ورود به لیستیا</a>
         </div>
       {% else %}
         <form method="POST" action="/login">
@@ -108,10 +115,12 @@
           <button type="submit" class="login-btn">ورود</button>
         </form>
         <div class="login-switch">
-          حساب نداری؟ <a href="/signup">ساخت کاربر جدید</a>
+          حساب نداری؟ <a href="/signup">ساخت حساب جدید در لیستیا</a>
         </div>
       {% endif %}
     </div>
+
+    <div class="login-credit">طراحی و توسعه: س.م.قتالی</div>
   </div>
 </body>
 </html>

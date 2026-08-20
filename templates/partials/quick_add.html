@@ -4,12 +4,20 @@
   id="quick-add"
   class="quick-card"
   data-units='{{ unit_types|tojson }}'
+  data-can-add-product='{{ "true" if (limits and limits.can_add_product) else "false" }}'
+  data-can-add-supplier='{{ "true" if (limits and limits.can_add_supplier) else "false" }}'
+  data-is-licensed='{{ "true" if (limits and limits.is_licensed) else "false" }}'
 >
 
   <div class="quick-head">
     <div class="quick-title">
       <span class="quick-dot"></span>
-      ثبت سریع
+      ثبت سریع در لیستیا
+      {% if limits and not limits.is_licensed %}
+        <span class="quota-pill {{ 'quota-pill-full' if not limits.can_add_product else '' }}">
+          {{ limits.product_count }}/5 کالا
+        </span>
+      {% endif %}
     </div>
 
     <div class="quick-hint">
@@ -24,6 +32,19 @@
     </div>
   </div>
 
+  {% if limits and not limits.can_add_product %}
+    <div class="license-lock-banner">
+      <div class="license-lock-icon">🔒</div>
+      <div class="license-lock-content">
+        <div class="license-lock-title">سقف ۵ محصول در نسخه آزمایشی تکمیل است</div>
+        <div class="license-lock-text">
+          ثبت محصول جدید قفل شده است؛ اما می‌توانید با همین ۵ محصول فعلی آزادانه کار کنید (سفارش، تغییر تعداد، ویرایش و...). برای افزودن کالاهای جدید، لایسنس تهیه فرمایید.
+        </div>
+      </div>
+      <button type="button" class="btn btn-accent btn-sm" onclick="openLicenseModal()">فعال‌سازی لایسنس</button>
+    </div>
+  {% endif %}
+
   <form
     id="qa-form"
     class="qa-form"
@@ -35,7 +56,7 @@
         class="field-label"
         for="qa-supplier"
       >
-      
+        تأمین‌کننده
       </label>
 
       <select
@@ -44,7 +65,7 @@
         required
       >
         <option value="">
-          انتخاب تامین کننده…
+          انتخاب تأمین‌کننده…
         </option>
 
         {% for supplier in suppliers %}
@@ -53,9 +74,15 @@
           </option>
         {% endfor %}
 
-        <option value="__new__">
-          ＋ تأمین‌کننده جدید…
-        </option>
+        {% if limits and not limits.can_add_supplier %}
+          <option value="__locked_supplier__">
+            🔒 ＋ تأمین‌کننده جدید (نیاز به لایسنس)
+          </option>
+        {% else %}
+          <option value="__new__">
+            ＋ تأمین‌کننده جدید…
+          </option>
+        {% endif %}
       </select>
     </div>
 
@@ -64,14 +91,15 @@
         class="field-label"
         for="qa-product"
       >
-    
+        نام محصول
       </label>
 
       <input
         id="qa-product"
         class="field"
         list="qa-names"
-        placeholder="مثلا: بشقاب شفاف 25 عددی"
+        placeholder="مثلاً: بشقاب شفاف ۲۵ عددی"
+        {{ 'disabled' if (limits and not limits.can_add_product) else '' }}
       >
 
       <datalist id="qa-names">
@@ -86,7 +114,7 @@
         class="field-label"
         for="qa-quantity"
       >
-      
+        تعداد
       </label>
 
       <input
@@ -96,6 +124,7 @@
         inputmode="numeric"
         min="0"
         placeholder="تعداد"
+        {{ 'disabled' if (limits and not limits.can_add_product) else '' }}
       >
     </div>
 
@@ -104,7 +133,7 @@
         class="field-label"
         id="qa-unit-label"
       >
-      
+        واحد
       </span>
 
       <div
@@ -121,6 +150,7 @@
             role="radio"
             aria-checked="{{ 'true' if loop.first else 'false' }}"
             tabindex="{{ '0' if loop.first else '-1' }}"
+            {{ 'disabled' if (limits and not limits.can_add_product) else '' }}
           >
             {{ unit }}
           </button>
@@ -139,13 +169,14 @@
         class="field-label"
         for="qa-description"
       >
-      
+        توضیحات (اختیاری)
       </label>
 
       <input
         id="qa-description"
         class="field"
         placeholder="توضیحات اختیاری"
+        {{ 'disabled' if (limits and not limits.can_add_product) else '' }}
       >
     </div>
 
@@ -153,21 +184,28 @@
       <button
         type="submit"
         class="btn btn-accent btn-block"
+        id="qa-submit-btn"
+        {{ 'disabled' if (limits and not limits.can_add_product) else '' }}
+        title="{{ 'برای ثبت محصولات بیشتر لایسنس تهیه کنید' if (limits and not limits.can_add_product) else 'ثبت خرید' }}"
       >
-        <svg
-          viewBox="0 0 24 24"
-          width="17"
-          height="17"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2.2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        >
-          <path d="M12 5v14M5 12h14"/>
-        </svg>
-
-        ثبت
+        {% if limits and not limits.can_add_product %}
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          قفل (نیاز به لایسنس)
+        {% else %}
+          <svg
+            viewBox="0 0 24 24"
+            width="17"
+            height="17"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2.2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+          ثبت
+        {% endif %}
       </button>
     </div>
 
