@@ -62,6 +62,22 @@ app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 60 * 60 * 24 * 365
 if os.environ.get("VERCEL"):
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"poolclass": NullPool}
 
+# سرو مطمئن فایل‌های static (لوگو، آیکون، CSS و JS) روی هاست‌هایی مثل لیارا که
+# اپ را با gunicorn پشت پروکسی اجرا می‌کنند. اگر whitenoise نصب نباشد، خود فلسک
+# مثل قبل فایل‌ها را سرو می‌کند و چیزی خراب نمی‌شود.
+try:
+    from whitenoise import WhiteNoise
+
+    app.wsgi_app = WhiteNoise(
+        app.wsgi_app,
+        root=os.path.join(BASE_DIR, "static"),
+        prefix="static/",
+        max_age=60 * 60 * 24 * 7,
+        autorefresh=True,
+    )
+except Exception:  # pragma: no cover - نبود whitenoise نباید اپ را زمین بزند
+    pass
+
 
 AUTH_COOKIE = "listia_auth"
 AUTH_MAX_AGE = 60 * 60 * 24 * 30
