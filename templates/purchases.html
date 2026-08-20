@@ -1,15 +1,14 @@
 {% extends "base.html" %}
-{% block title %}لیست همه خریدها{% endblock %}
+{% block title %}لیست خریدها · لیستیا{% endblock %}
 
 {% block content %}
 
   <div class="page-head">
     <div>
-      <h1 class="page-title">📋 لیست همه خریدها</h1>
-      <div class="page-sub">سفارش‌های فعال خودت، از همه تأمین‌کننده‌ها</div>
+      <h1 class="page-title">📋 لیست خریدها</h1>
+      <div class="page-sub">سفارش‌های فعال در سامانه لیستیا</div>
     </div>
   </div>
-
 
   <div id="purchases-card" class="card" style="{{ 'display:none;' if not products }}">
     <div class="table-scroll">
@@ -94,7 +93,6 @@
       updateEmpty();
     }
 
-
     const CHECK_SVG = '<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"3.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M20 6 9 17l-5-5\"></path></svg>';
 
     function orderCellHtml(id) {
@@ -112,7 +110,6 @@
         box.setAttribute("aria-pressed", "true");
       }
 
-      // keep the green tick on screen for a moment before the row leaves the list
       setTimeout(function () { commitOrder(id, row); }, 420);
     }
 
@@ -235,9 +232,6 @@
         '<td><button type="button" class="icon-btn danger" title="حذف" onclick="deleteProduct(' + row.dataset.id + ')">' +
           '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button></td>';
     }
-
-
-
   </script>
 
 {% endblock %}

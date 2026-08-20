@@ -1,0 +1,217 @@
+{% extends "base.html" %}
+{% block title %}پنل صدور لایسنس · لیستیا{% endblock %}
+
+{% block content %}
+
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">🔑 پنل صدور لایسنس</h1>
+      <div class="page-sub">ابزار اختصاصی س.م.قتالی جهت تولید و ارسال کلیدهای لایسنس به مشتریان</div>
+    </div>
+    <div>
+      <span class="tag tag-accent">👑 حساب مدیر و توسعه‌دهنده</span>
+    </div>
+  </div>
+
+  <div class="card card-pad" style="margin-bottom:24px;">
+    <h3 class="account-section-title">✨ تولید لایسنس جدید</h3>
+
+    <form id="admin-gen-form" onsubmit="generateLicense(event)">
+      <div style="display:flex; gap:16px; margin-bottom:14px; flex-wrap:wrap;">
+        <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px; font-weight:600;">
+          <input type="radio" name="lic_mode" value="user" checked onchange="toggleMode()">
+          لایسنس اختصاصی کاربر (بر اساس نام کاربری یا کد دستگاه)
+        </label>
+        <label style="display:flex; align-items:center; gap:6px; cursor:pointer; font-size:13px; font-weight:600;">
+          <input type="radio" name="lic_mode" value="master" onchange="toggleMode()">
+          کلید سراسری (Master Key - معتبر برای همه حساب‌ها)
+        </label>
+      </div>
+
+      <div class="field-row" style="align-items:flex-end;">
+        <div id="ident-field-wrap" style="flex:1; min-width:260px;">
+          <label class="field-label" for="gen-ident">نام کاربری یا شناسه فعال‌سازی مشتری:</label>
+          <input id="gen-ident" class="field mono" placeholder="مثلاً: mohammad یا LST-2C17-F3FA" autocomplete="off" required>
+        </div>
+
+        <div style="width:160px;">
+          <label class="field-label" for="gen-tier">پلن لایسنس:</label>
+          <select id="gen-tier" class="field">
+            <option value="PRO" selected>پرو (نامحدود)</option>
+            <option value="UNLIMITED">سازمانی (نامحدود)</option>
+          </select>
+        </div>
+
+        <button type="submit" id="gen-btn" class="btn btn-accent" style="height:44px;">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m21 2-9.6 9.6M15.5 7.5l2.5 2.5M18 5l2 2"/></svg>
+          تولید لایسنس آنی
+        </button>
+      </div>
+    </form>
+
+    <!-- Results Box -->
+    <div id="gen-result-card" class="card card-pad" style="display:none; margin-top:20px; background:var(--surface-muted); border:1px solid #D5E2EC;">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;">
+        <strong style="color:var(--success); font-size:14.5px;">✓ لایسنس با موفقیت تولید شد</strong>
+        <span id="res-target-tag" class="tag tag-accent"></span>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label">کلید لایسنس تولیدشده (License Key):</label>
+        <div class="token-row">
+          <input id="res-key" class="field mono" readonly style="font-size:16px; font-weight:700; color:var(--teal); flex:1;">
+          <button type="button" class="btn btn-accent" onclick="copyGenKey()">کپی کلید</button>
+        </div>
+      </div>
+
+      <div class="field-group" style="margin-top:14px;">
+        <label class="field-label">متن آماده جهت ارسال به مشتری (واتساپ / تلگرام / بله / پیامک):</label>
+        <textarea id="res-msg" class="field" style="height:110px; padding:10px 12px; font-size:12.5px; line-height:1.7; resize:vertical;" readonly></textarea>
+        <button type="button" class="btn btn-ghost btn-sm" style="margin-top:6px;" onclick="copyGenMsg()">کپی متن پیام مشتری</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Users list card -->
+  <div class="card card-pad">
+    <div class="section-head" style="margin-bottom:14px;">
+      <h3 class="account-section-title" style="margin:0;">👥 کاربران ثبت‌شده در سیستم ({{ users|length }})</h3>
+      <span class="page-sub" style="margin:0;">می‌توانید برای هر کاربر با یک کلیک لایسنس صادر کنید</span>
+    </div>
+
+    <div class="table-scroll">
+      <table class="data">
+        <thead>
+          <tr>
+            <th>شناسه</th>
+            <th>نام کاربری</th>
+            <th>کد فعال‌سازی سیستم</th>
+            <th>تأمین‌کننده</th>
+            <th>محصولات</th>
+            <th>وضعیت لایسنس</th>
+            <th class="col-actions">عملیات</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for u in users %}
+            <tr>
+              <td class="mono muted">#{{ u.id }}</td>
+              <td>
+                <strong>{{ u.username }}</strong>
+                {% if u.username.lower() in ['smq2458', 'admin'] %}
+                  <span class="tag tag-accent" style="font-size:10px; margin-right:4px;">مدیر</span>
+                {% endif %}
+              </td>
+              <td><code class="mono">{{ u.user_code }}</code></td>
+              <td class="mono">{{ u.supplier_count }}</td>
+              <td class="mono">{{ u.product_count }}</td>
+              <td>
+                {% if u.is_licensed %}
+                  <span class="tag tag-success">✓ نامحدود</span>
+                {% else %}
+                  <span class="tag tag-accent">آزمایشی (محدود)</span>
+                {% endif %}
+              </td>
+              <td class="cell-actions">
+                <button type="button" class="btn btn-ghost btn-sm" onclick="quickGenForUser('{{ u.username }}')" title="تولید لایسنس برای {{ u.username }}">
+                  ⚡ صدور لایسنس
+                </button>
+              </td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    function toggleMode() {
+      const mode = document.querySelector('input[name="lic_mode"]:checked').value;
+      const wrap = document.getElementById("ident-field-wrap");
+      const identInput = document.getElementById("gen-ident");
+      if (mode === "master") {
+        wrap.style.opacity = "0.4";
+        identInput.required = false;
+        identInput.value = "MASTER (سراسری)";
+        identInput.disabled = true;
+      } else {
+        wrap.style.opacity = "1";
+        identInput.required = true;
+        identInput.disabled = false;
+        identInput.value = "";
+        identInput.focus();
+      }
+    }
+
+    function quickGenForUser(username) {
+      document.querySelector('input[name="lic_mode"][value="user"]').checked = true;
+      toggleMode();
+      const input = document.getElementById("gen-ident");
+      input.value = username;
+      document.getElementById("admin-gen-form").scrollIntoView({ behavior: "smooth", block: "center" });
+      generateLicense();
+    }
+
+    function generateLicense(e) {
+      if (e) e.preventDefault();
+      const mode = document.querySelector('input[name="lic_mode"]:checked').value;
+      const isMaster = mode === "master";
+      const ident = isMaster ? "" : document.getElementById("gen-ident").value.trim();
+      const tier = document.getElementById("gen-tier").value;
+      const btn = document.getElementById("gen-btn");
+
+      if (!isMaster && !ident) {
+        showError("نام کاربری یا شناسه مشتری را وارد کنید.");
+        return;
+      }
+
+      btn.disabled = true;
+      App.request("/api/admin/generate-license", {
+        form: {
+          identifier: ident,
+          tier: tier,
+          is_master: isMaster ? "1" : "0"
+        }
+      })
+      .then(function(res) {
+        btn.disabled = false;
+        if (!res.ok) {
+          showError((res.data && res.data.message) || "خطا در تولید لایسنس");
+          return;
+        }
+
+        const data = res.data;
+        document.getElementById("res-key").value = data.license_key;
+        document.getElementById("res-msg").value = data.customer_message;
+        document.getElementById("res-target-tag").textContent = data.identifier + " (" + data.tier + ")";
+        const card = document.getElementById("gen-result-card");
+        card.style.display = "block";
+        card.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        showSuccess("لایسنس با موفقیت تولید شد");
+      })
+      .catch(function() {
+        btn.disabled = false;
+        showError("خطا در ارتباط با سرور");
+      });
+    }
+
+    function copyGenKey() {
+      const el = document.getElementById("res-key");
+      el.select();
+      el.setSelectionRange(0, 99999);
+      if (navigator.clipboard) navigator.clipboard.writeText(el.value).catch(function() {});
+      else document.execCommand("copy");
+      showSuccess("کلید لایسنس کپی شد");
+    }
+
+    function copyGenMsg() {
+      const el = document.getElementById("res-msg");
+      el.select();
+      el.setSelectionRange(0, 99999);
+      if (navigator.clipboard) navigator.clipboard.writeText(el.value).catch(function() {});
+      else document.execCommand("copy");
+      showSuccess("متن پیام مشتری کپی شد");
+    }
+  </script>
+
+{% endblock %}

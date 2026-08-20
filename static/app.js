@@ -1,6 +1,6 @@
 /* ==========================================================================
-   مدیریت خرید — shared front-end layer
-   یک فایل مشترک برای همه صفحه‌ها: پیام‌ها، درخواست‌ها و موتور «ثبت سریع»
+   لیستیا (مدیریت خرید) — shared front-end layer
+   یک فایل مشترک برای همه صفحه‌ها: پیام‌ها، لایسنس، درخواست‌ها و موتور «ثبت سریع»
    ========================================================================== */
 
 (function (window, document) {
@@ -470,7 +470,6 @@
 
           event.preventDefault();
 
-          // روی تعداد Enter زده شود، فوکوس به چیپ واحد می‌رود.
           if (el === this.quantity) {
             const selectedUnit =
               this.unitChips &&
@@ -485,7 +484,6 @@
             return;
           }
 
-          // روی توضیحات Enter زده شود، محصول ثبت می‌شود.
           if (
             el === this.description ||
             index === chain.length - 1
@@ -524,7 +522,9 @@
 
         if (event.key.toLowerCase() === "n") {
           event.preventDefault();
-          this.product.focus();
+          if (this.product && !this.product.disabled) {
+            this.product.focus();
+          }
         }
       });
     },
@@ -533,6 +533,13 @@
 
     bindSupplier() {
       this.supplier.addEventListener("change", () => {
+        if (this.supplier.value === "__locked_supplier__") {
+          this.supplier.value = this.lastSupplier || "";
+          toast("در نسخه آزمایشی فقط مجاز به ثبت ۱ تأمین‌کننده هستید. برای افزودن تأمین‌کننده لایسنس تهیه فرمایید.", "warning", 4500);
+          openLicenseModal();
+          return;
+        }
+
         if (this.supplier.value === "__new__") {
           this.openNewSupplier();
           return;
@@ -571,7 +578,7 @@
       this.unitChips.addEventListener("click", (event) => {
         const chip = event.target.closest(".unit-chip");
 
-        if (!chip) return;
+        if (!chip || chip.disabled) return;
 
         this.selectUnit(chip.dataset.value);
       });
@@ -579,9 +586,8 @@
       this.unitChips.addEventListener("keydown", (event) => {
         const chip = event.target.closest(".unit-chip");
 
-        if (!chip) return;
+        if (!chip || chip.disabled) return;
 
-        // Enter روی چیپ، واحد را انتخاب کرده و به توضیحات می‌رود.
         if (event.key === "Enter") {
           event.preventDefault();
 
@@ -685,11 +691,12 @@
             option.remove();
             this.supplier.value = this.lastSupplier || "";
 
-            toast(
-              (result.data && result.data.message) ||
-              "تأمین‌کننده ثبت نشد",
-              "error"
-            );
+            const msg = (result.data && result.data.message) || "تأمین‌کننده ثبت نشد";
+            toast(msg, "error");
+
+            if (result.status === 403 || (result.data && result.data.license_locked)) {
+              openLicenseModal();
+            }
 
             return;
           }
@@ -766,6 +773,7 @@
       if (
         !supplierId ||
         supplierId === "__new__" ||
+        supplierId === "__locked_supplier__" ||
         name.length < 2
       ) {
         return;
@@ -812,6 +820,12 @@
     /* ------------------------------------------------------------ submit */
 
     submit() {
+      if (this.root && this.root.dataset.canAddProduct === "false") {
+        toast("سقف ۵ محصول نسخه آزمایشی پر شده است. برای ثبت کالای بیشتر لایسنس تهیه کنید.", "error", 4000);
+        openLicenseModal();
+        return;
+      }
+
       const supplierId = this.supplier.value;
       const name = this.product.value.trim();
       const unit = this.unit.value || this.units[0];
@@ -822,7 +836,8 @@
 
       if (
         !supplierId ||
-        supplierId === "__new__"
+        supplierId === "__new__" ||
+        supplierId === "__locked_supplier__"
       ) {
         this.shake(this.supplier);
         toast(
@@ -882,8 +897,6 @@
       };
 
       this.addRow(item);
-
-      // فیلدها پاک می‌شوند و فوکوس به محصول برمی‌گردد.
       this.clearFields();
 
       this.save(
@@ -938,11 +951,11 @@
           this.updateSync();
 
           if (!result.ok) {
-            this.fail(
-              key,
-              (result.data && result.data.message) ||
-              "ثبت نشد"
-            );
+            const msg = (result.data && result.data.message) || "ثبت نشد";
+            this.fail(key, msg);
+            if (result.status === 403 || (result.data && result.data.license_locked)) {
+              openLicenseModal();
+            }
             return;
           }
 
@@ -1006,8 +1019,7 @@
       }
 
       toast(
-        message +
-        " — ردیف قرمز را دوباره بفرست",
+        message,
         "error"
       );
     },
@@ -1583,21 +1595,23 @@
     /* --------------------------------------------------------- utilities */
 
     clearFields(all) {
-      this.product.value = "";
-      this.quantity.value = "";
+      if (this.product && !this.product.disabled) {
+        this.product.value = "";
+      }
+      if (this.quantity && !this.quantity.disabled) {
+        this.quantity.value = "";
+      }
 
-      if (this.description) {
+      if (this.description && !this.description.disabled) {
         this.description.value = "";
       }
 
-      // واحد چسبنده نیست و بعد از ثبت به اولین واحد برمی‌گردد.
       this.selectUnit(this.units[0]);
 
       if (all) {
-        this.product.blur();
+        if (this.product) this.product.blur();
       } else {
-        // بعد از ثبت، کاربر می‌تواند بلافاصله محصول بعدی را تایپ کند.
-        this.product.focus();
+        if (this.product && !this.product.disabled) this.product.focus();
       }
     },
 
@@ -1630,9 +1644,7 @@
           storeKey,
           value
         );
-      } catch (err) {
-        // حالت Private Browser
-      }
+      } catch (err) {}
 
       if (storeKey === "pm.supplier") {
         this.lastSupplier = value;
@@ -1662,28 +1674,129 @@
       }
 
       this.lastSupplier = this.supplier.value;
-
-      // واحد همیشه از اولین گزینه شروع می‌شود.
       this.selectUnit(this.units[0]);
 
       try {
         window.localStorage.removeItem("pm.unit");
-      } catch (err) {
-        // حالت Private Browser
-      }
+      } catch (err) {}
     },
 
     focusStart() {
       if (
         this.supplier.value &&
-        this.supplier.value !== "__new__"
+        this.supplier.value !== "__new__" &&
+        this.supplier.value !== "__locked_supplier__"
       ) {
-        this.product.focus();
+        if (this.product && !this.product.disabled) {
+          this.product.focus();
+        }
       } else {
         this.supplier.focus();
       }
     }
   };
+
+  /* ========================================================= License UI */
+
+  function openLicenseModal() {
+    const modal = document.getElementById("license-modal");
+    if (!modal) return;
+    modal.hidden = false;
+    modal.classList.add("modal-open");
+    const input = document.getElementById("modal-license-key");
+    if (input) {
+      setTimeout(() => input.focus(), 100);
+    }
+  }
+
+  function closeLicenseModal() {
+    const modal = document.getElementById("license-modal");
+    if (!modal) return;
+    modal.classList.remove("modal-open");
+    modal.hidden = true;
+    const errBox = document.getElementById("modal-license-error");
+    if (errBox) errBox.style.display = "none";
+    const succBox = document.getElementById("modal-license-success");
+    if (succBox) succBox.style.display = "none";
+  }
+
+  function copyUserCode() {
+    const el = document.getElementById("modal-user-code");
+    if (!el) return;
+    el.select();
+    el.setSelectionRange(0, 99999);
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(el.value).catch(function () {});
+    } else {
+      document.execCommand("copy");
+    }
+    toast("شناسه فعال‌سازی کپی شد", "success");
+  }
+
+  function handleLicenseSubmit(e) {
+    e.preventDefault();
+    const input = document.getElementById("modal-license-key");
+    const btn = document.getElementById("modal-license-btn");
+    const errBox = document.getElementById("modal-license-error");
+    const succBox = document.getElementById("modal-license-success");
+
+    if (errBox) errBox.style.display = "none";
+    if (succBox) succBox.style.display = "none";
+
+    const key = input ? input.value.trim() : "";
+    if (!key) return;
+
+    if (btn) btn.disabled = true;
+
+    request("/account/license", { form: { license_key: key } })
+      .then(function (result) {
+        if (btn) btn.disabled = false;
+        if (!result.ok) {
+          const msg = (result.data && result.data.message) || "کلید لایسنس نامعتبر است.";
+          if (errBox) {
+            errBox.textContent = msg;
+            errBox.style.display = "block";
+          }
+          toast(msg, "error");
+          return;
+        }
+
+        const msg = (result.data && result.data.message) || "لایسنس با موفقیت فعال شد!";
+        if (succBox) {
+          succBox.textContent = msg;
+          succBox.style.display = "block";
+        }
+        toast(msg, "success");
+
+        setTimeout(function () {
+          window.location.reload();
+        }, 1200);
+      })
+      .catch(function () {
+        if (btn) btn.disabled = false;
+        if (errBox) {
+          errBox.textContent = "خطا در ارتباط با سرور";
+          errBox.style.display = "block";
+        }
+        toast("خطا در ارتباط با سرور", "error");
+      });
+  }
+
+  document.addEventListener("keydown", function(e) {
+    if (e.key === "Escape") {
+      const modal = document.getElementById("license-modal");
+      if (modal && !modal.hidden) {
+        closeLicenseModal();
+      }
+    }
+  });
+
+  document.addEventListener("click", function(e) {
+    const modal = document.getElementById("license-modal");
+    if (modal && !modal.hidden && e.target === modal) {
+      closeLicenseModal();
+    }
+  });
 
   /* ------------------------------------------------------------- exports */
 
@@ -1700,6 +1813,10 @@
   window.escapeHtml = escapeHtml;
   window.escapeAttr = escapeAttr;
   window.background = background;
+  window.openLicenseModal = openLicenseModal;
+  window.closeLicenseModal = closeLicenseModal;
+  window.copyUserCode = copyUserCode;
+  window.handleLicenseSubmit = handleLicenseSubmit;
 
   window.showError = function (text) {
     toast(text, "error");

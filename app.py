@@ -1,6 +1,6 @@
 import os
 import secrets
-from datetime import date
+from datetime import date, datetime
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -19,6 +19,15 @@ from sqlalchemy import inspect, or_, text
 from sqlalchemy.orm import joinedload
 from sqlalchemy.pool import NullPool
 import jdatetime
+
+from licensing import (
+    FREE_MAX_SUPPLIERS,
+    FREE_MAX_PRODUCTS,
+    get_user_code,
+    generate_key,
+    generate_master_key,
+    verify_key,
+)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 INSTANCE_DIR = os.path.join(BASE_DIR, "instance")
@@ -57,6 +66,7 @@ def _allow_iframe_preview(response):
 db = SQLAlchemy(app)
 
 UNIT_TYPES = ["عدد", "کارتن", "بسته", "گونی", "کیلو"]
+ADMIN_USERNAMES = {"smq2458", "admin"}
 
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -104,13 +114,70 @@ class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(100), unique=True, nullable=False)
     password_hash = db.Column(db.String(300), nullable=False)
-     # کلید شخصی برای ثبت از بیرون اپ (مثلاً Shortcuts آیفون)
+    # کلید شخصی برای ثبت از بیرون اپ (مثلاً Shortcuts آیفون)
     api_token = db.Column(db.String(64), unique=True, nullable=True)
+    # لایسنس نرم‌افزار لیستیا
+    is_licensed = db.Column(db.Boolean, default=False)
+    license_key = db.Column(db.String(100), nullable=True)
+    licensed_at = db.Column(db.DateTime, nullable=True)
+    license_type = db.Column(db.String(50), default="free")
+    # دسترسی مدیریت و صدور لایسنس
+    is_admin = db.Column(db.Boolean, default=False)
 
 
 @login_manager.user_loader
 def load_user(user_id):
     return db.session.get(User, int(user_id))
+
+
+def is_admin_user(user=None):
+    """بررسی اینکه آیا کاربر مدیر سامانه (س.م.قتالی) است یا خیر"""
+    user = user or current_user
+    if not user or not user.is_authenticated:
+        return False
+    return bool(getattr(user, "is_admin", False) or (user.username and user.username.lower() in ADMIN_USERNAMES))
+
+
+def get_user_limits(user=None):
+    """محاسبه وضعیت سهمیه و لایسنس کاربر"""
+    if user is None:
+        if current_user.is_authenticated:
+            user = current_user
+        else:
+            return {
+                "is_licensed": False,
+                "is_admin": False,
+                "user_code": "",
+                "supplier_count": 0,
+                "product_count": 0,
+                "max_suppliers": FREE_MAX_SUPPLIERS,
+                "max_products": FREE_MAX_PRODUCTS,
+                "can_add_supplier": False,
+                "can_add_product": False,
+                "license_type": "free",
+                "licensed_at": None,
+                "license_key": None,
+            }
+
+    admin = is_admin_user(user)
+    is_lic = bool(user.is_licensed or admin)
+    s_count = Supplier.query.filter_by(owner_id=user.id).count()
+    p_count = Product.query.filter_by(owner_id=user.id).count()
+
+    return {
+        "is_licensed": is_lic,
+        "is_admin": admin,
+        "user_code": get_user_code(user),
+        "supplier_count": s_count,
+        "product_count": p_count,
+        "max_suppliers": None if is_lic else FREE_MAX_SUPPLIERS,
+        "max_products": None if is_lic else FREE_MAX_PRODUCTS,
+        "can_add_supplier": is_lic or (s_count < FREE_MAX_SUPPLIERS),
+        "can_add_product": is_lic or (p_count < FREE_MAX_PRODUCTS),
+        "license_type": user.license_type if is_lic else "free",
+        "licensed_at": user.licensed_at,
+        "license_key": user.license_key,
+    }
 
 
 def product_payload(product, supplier_name=None):
@@ -128,6 +195,7 @@ def product_payload(product, supplier_name=None):
         "ordered_date": product.ordered_date.isoformat() if product.ordered_date else None,
         "ordered_date_label": shamsi_label(product.ordered_date),
     }
+
 
 def issue_api_token(user):
     """یک کلید تازه می‌سازد و ذخیره می‌کند."""
@@ -157,8 +225,12 @@ def user_from_api_token():
         return None
     return User.query.filter_by(api_token=token).first()
 
-def json_error(message, status=400):
-    return {"success": False, "message": message}, status
+
+def json_error(message, status=400, extra=None):
+    payload = {"success": False, "message": message}
+    if extra:
+        payload.update(extra)
+    return payload, status
 
 
 def user_suppliers():
@@ -257,17 +329,47 @@ def ensure_schema():
         if cols and "owner_id" not in cols:
             missing_owner_cols.append(table)
 
-        user_cols = _table_columns("user")
+    user_cols = _table_columns("user")
 
     with db.engine.begin() as conn:
         for table in missing_owner_cols:
-            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN owner_id INTEGER"))
-
-        if user_cols and "api_token" not in user_cols:
             try:
-                conn.execute(text('ALTER TABLE "user" ADD COLUMN api_token VARCHAR(64)'))
+                conn.execute(text(f"ALTER TABLE {table} ADD COLUMN owner_id INTEGER"))
             except Exception:
                 pass
+
+        if user_cols:
+            if "api_token" not in user_cols:
+                try:
+                    conn.execute(text('ALTER TABLE "user" ADD COLUMN api_token VARCHAR(64)'))
+                except Exception:
+                    pass
+            if "is_licensed" not in user_cols:
+                try:
+                    conn.execute(text('ALTER TABLE "user" ADD COLUMN is_licensed BOOLEAN DEFAULT 0'))
+                except Exception:
+                    pass
+            if "license_key" not in user_cols:
+                try:
+                    conn.execute(text('ALTER TABLE "user" ADD COLUMN license_key VARCHAR(100)'))
+                except Exception:
+                    pass
+            if "licensed_at" not in user_cols:
+                try:
+                    conn.execute(text('ALTER TABLE "user" ADD COLUMN licensed_at TIMESTAMP'))
+                except Exception:
+                    pass
+            if "license_type" not in user_cols:
+                try:
+                    conn.execute(text('ALTER TABLE "user" ADD COLUMN license_type VARCHAR(50) DEFAULT \'free\''))
+                except Exception:
+                    pass
+            if "is_admin" not in user_cols:
+                try:
+                    conn.execute(text('ALTER TABLE "user" ADD COLUMN is_admin BOOLEAN DEFAULT 0'))
+                except Exception:
+                    pass
+
         try:
             conn.execute(
                 text(
@@ -280,7 +382,6 @@ def ensure_schema():
         for statement in (
             "CREATE INDEX IF NOT EXISTS ix_supplier_owner ON supplier (owner_id)",
             "CREATE INDEX IF NOT EXISTS ix_product_owner ON product (owner_id)",
-            # the two lists the app opens most: active rows, and one supplier's rows
             "CREATE INDEX IF NOT EXISTS ix_product_owner_ordered ON product (owner_id, ordered)",
             "CREATE INDEX IF NOT EXISTS ix_product_supplier_ordered "
             "ON product (supplier_id, ordered, ordered_date)",
@@ -289,6 +390,17 @@ def ensure_schema():
                 conn.execute(text(statement))
             except Exception:
                 pass
+
+        # ارتقای خودکار کاربر smq2458 به عنوان مدیر و دارای لایسنس کامل
+        try:
+            conn.execute(
+                text(
+                    "UPDATE \"user\" SET is_licensed = 1, is_admin = 1, license_type = 'UNLIMITED' "
+                    "WHERE LOWER(username) IN ('smq2458', 'admin')"
+                )
+            )
+        except Exception:
+            pass
 
     first = db.session.execute(text('SELECT id FROM "user" ORDER BY id LIMIT 1')).scalar()
     if first:
@@ -319,7 +431,16 @@ ASSET_VERSION = _asset_version()
 
 @app.context_processor
 def inject_template_globals():
-    return {"asset_v": ASSET_VERSION, "unit_types": UNIT_TYPES}
+    limits = get_user_limits(current_user) if current_user.is_authenticated else None
+    admin = is_admin_user(current_user) if current_user.is_authenticated else False
+    return {
+        "asset_v": ASSET_VERSION,
+        "unit_types": UNIT_TYPES,
+        "app_name": "لیستیا",
+        "developer_name": "س.م.قتالی",
+        "limits": limits,
+        "is_admin": admin,
+    }
 
 
 _schema_ready = False
@@ -333,7 +454,6 @@ def _prepare_request():
             ensure_schema()
             _schema_ready = True
         except Exception:
-            # Retry on the next request if the database is temporarily unavailable.
             pass
 
     allowed = {"login", "signup", "static", "api_quick_add", "api_suppliers"}
@@ -348,7 +468,6 @@ def home():
     """Opening the app lands straight on the capture screen."""
     suppliers = user_suppliers()
 
-    # one grouped query instead of two counts (SQLite gives 0/1, Postgres True/False)
     active_count = archived_count = 0
     for ordered_flag, total in (
         db.session.query(Product.ordered, db.func.count(Product.id))
@@ -374,6 +493,8 @@ def home():
         .all()
     )
 
+    limits = get_user_limits(current_user)
+
     return render_template(
         "dashboard.html",
         suppliers=suppliers,
@@ -382,6 +503,7 @@ def home():
         active_count=active_count,
         archived_count=archived_count,
         recent=recent,
+        limits=limits,
     )
 
 
@@ -395,6 +517,12 @@ def login():
         password = request.form.get("password", "")
         user = User.query.filter_by(username=username).first()
         if user and check_password_hash(user.password_hash, password):
+            # کاربر smq2458 به عنوان توسعه دهنده خودکار لایسنس و ادمین فعال دارد
+            if user.username.lower() in ADMIN_USERNAMES:
+                user.is_admin = True
+                user.is_licensed = True
+                user.license_type = "UNLIMITED"
+                db.session.commit()
             login_user(user)
             return redirect("/")
         return render_template("login.html", mode="login", error="نام کاربری یا رمز عبور اشتباه است.")
@@ -428,7 +556,14 @@ def signup():
                 "login.html", mode="signup", error="این نام کاربری قبلاً وجود دارد."
             )
 
-        user = User(username=username, password_hash=generate_password_hash(password))
+        is_admin_account = username.lower() in ADMIN_USERNAMES
+        user = User(
+            username=username,
+            password_hash=generate_password_hash(password),
+            is_licensed=is_admin_account,
+            license_type="UNLIMITED" if is_admin_account else "free",
+            is_admin=is_admin_account,
+        )
         db.session.add(user)
         db.session.commit()
         claim_orphaned_data(user.id)
@@ -451,7 +586,21 @@ def search():
 
 @app.route("/new-purchase", methods=["GET", "POST"])
 def new_purchase():
+    limits = get_user_limits(current_user)
+
     if request.method == "POST":
+        if not limits["can_add_product"]:
+            msg = "سقف نسخه آزمایشی (۵ محصول) تکمیل شده است. برای ثبت محصول جدید باید لایسنس لیستیا را تهیه کنید."
+            if wants_json():
+                return json_error(msg, 403, {"license_locked": True})
+            return render_template(
+                "new_purchase.html",
+                suppliers=user_suppliers(),
+                message=msg,
+                success=False,
+                limits=limits,
+            )
+
         fields, error = read_product_form()
 
         supplier = None
@@ -472,6 +621,7 @@ def new_purchase():
                 suppliers=user_suppliers(),
                 message=error,
                 success=False,
+                limits=limits,
             )
 
         new_product = Product(
@@ -499,6 +649,7 @@ def new_purchase():
         suppliers=user_suppliers(),
         product_names=recent_product_names(),
         message=None,
+        limits=limits,
     )
 
 
@@ -637,7 +788,15 @@ def delete_archive_group(supplier_id, date_str):
 
 @app.route("/suppliers", methods=["GET", "POST"])
 def suppliers():
+    limits = get_user_limits(current_user)
+
     if request.method == "POST":
+        if not limits["can_add_supplier"]:
+            msg = "سقف نسخه آزمایشی (۱ تأمین‌کننده) تکمیل شده است. برای ثبت تأمین‌کنندگان بیشتر باید لایسنس لیستیا را تهیه کنید."
+            if wants_json():
+                return json_error(msg, 403, {"license_locked": True})
+            return render_template("suppliers.html", suppliers=user_suppliers(), error=msg, limits=limits)
+
         name = request.form.get("name", "").strip()
 
         if not name:
@@ -659,7 +818,7 @@ def suppliers():
             return {"success": True, "id": new_supplier.id, "name": new_supplier.name}
         return redirect("/suppliers")
 
-    return render_template("suppliers.html", suppliers=user_suppliers())
+    return render_template("suppliers.html", suppliers=user_suppliers(), limits=limits)
 
 
 @app.route("/supplier/<int:supplier_id>")
@@ -753,7 +912,7 @@ def download_template():
     return send_file(
         os.path.join(BASE_DIR, "static", "sample_import.xlsx"),
         as_attachment=True,
-        download_name="نمونه_ایمپورت_خرید.xlsx",
+        download_name="نمونه_ایمپورت_لیستیا.xlsx",
     )
 
 
@@ -817,8 +976,10 @@ def api_search():
 
 @app.route("/import", methods=["GET", "POST"])
 def import_excel():
+    limits = get_user_limits(current_user)
+
     if request.method == "GET":
-        return render_template("import_excel.html", message=None, errors=None)
+        return render_template("import_excel.html", message=None, errors=None, limits=limits)
 
     uploaded_file = request.files.get("file")
 
@@ -828,6 +989,7 @@ def import_excel():
             message="فایلی انتخاب نشده است.",
             success=False,
             errors=None,
+            limits=limits,
         )
 
     import difflib
@@ -846,6 +1008,7 @@ def import_excel():
             message=f"خطا در خواندن فایل: {exc}",
             success=False,
             errors=None,
+            limits=limits,
         )
 
     df = df.dropna(how="all")
@@ -856,6 +1019,9 @@ def import_excel():
 
     added_count = 0
     errors = []
+
+    current_product_count = Product.query.filter_by(owner_id=current_user.id).count()
+    current_supplier_count = len(existing_suppliers)
 
     for index, row in df.iterrows():
         excel_row_number = index + 2
@@ -904,6 +1070,12 @@ def import_excel():
                 )
                 continue
 
+            if not limits["is_licensed"] and current_supplier_count >= FREE_MAX_SUPPLIERS:
+                errors.append(
+                    f"ردیف {excel_row_number}: ثبت تأمین‌کننده جدید «{supplier_name}» ناموفق بود. در نسخه آزمایشی فقط مجاز به داشتن ۱ تأمین‌کننده هستید. (نیاز به لایسنس)"
+                )
+                continue
+
             new_supplier = Supplier(name=supplier_name, owner_id=current_user.id)
             db.session.add(new_supplier)
             db.session.flush()
@@ -911,6 +1083,13 @@ def import_excel():
             normalized_map[norm_name] = new_supplier
             normalized_names.append(norm_name)
             supplier_id = new_supplier.id
+            current_supplier_count += 1
+
+        if not limits["is_licensed"] and (current_product_count + added_count) >= FREE_MAX_PRODUCTS:
+            errors.append(
+                f"ردیف {excel_row_number}: سقف ۵ محصول در نسخه آزمایشی پر شد. محصول «{product_name}» ثبت نشد. (برای افزودن محصولات بیشتر لایسنس تهیه کنید)"
+            )
+            continue
 
         new_product = Product(
             owner_id=current_user.id,
@@ -932,8 +1111,9 @@ def import_excel():
     return render_template(
         "import_excel.html",
         message=message,
-        success=True,
+        success=added_count > 0,
         errors=errors if errors else None,
+        limits=get_user_limits(current_user),
     )
 
 # ---------------------------------------------------------------------------
@@ -942,56 +1122,68 @@ def import_excel():
 
 
 def resolve_supplier(user, raw):
-    """تأمین‌کننده را از روی شناسه یا نام پیدا می‌کند؛ نبود، می‌سازدش."""
+    """تأمین‌کننده را از روی شناسه یا نام پیدا می‌کند؛ نبود، با بررسی لایسنس می‌سازدش."""
     raw = (raw or "").strip()
 
     if raw.isdigit():
         found = Supplier.query.filter_by(id=int(raw), owner_id=user.id).first()
         if found:
-            return found, False
+            return found, False, None
 
     if raw:
         target = normalize_name(raw)
         for supplier in Supplier.query.filter_by(owner_id=user.id).all():
             if normalize_name(supplier.name) == target:
-                return supplier, False
+                return supplier, False, None
+
+        s_count = Supplier.query.filter_by(owner_id=user.id).count()
+        user_licensed = bool(user.is_licensed or is_admin_user(user))
+        if not user_licensed and s_count >= FREE_MAX_SUPPLIERS:
+            return None, False, "سقف ۱ تأمین‌کننده نسخه آزمایشی پر شده است. نیاز به لایسنس."
 
         created = Supplier(name=raw, owner_id=user.id)
         db.session.add(created)
         db.session.flush()
-        return created, True
+        return created, True, None
 
-    # چیزی نفرستاده: آخرین تأمین‌کننده‌ای که برایش ثبت کرده
     last = (
         Product.query.filter_by(owner_id=user.id)
         .order_by(Product.id.desc())
         .first()
     )
     if last:
-        return db.session.get(Supplier, last.supplier_id), False
+        return db.session.get(Supplier, last.supplier_id), False, None
 
     first = Supplier.query.filter_by(owner_id=user.id).order_by(Supplier.id).first()
     if first:
-        return first, False
+        return first, False, None
+
+    s_count = Supplier.query.filter_by(owner_id=user.id).count()
+    user_licensed = bool(user.is_licensed or is_admin_user(user))
+    if not user_licensed and s_count >= FREE_MAX_SUPPLIERS:
+        return None, False, "سقف ۱ تأمین‌کننده نسخه آزمایشی پر شده است. نیاز به لایسنس."
 
     created = Supplier(name="نامشخص", owner_id=user.id)
     db.session.add(created)
     db.session.flush()
-    return created, True
+    return created, True, None
 
 
 @app.route("/api/quick-add", methods=["GET", "POST"])
 def api_quick_add():
-    """ثبت یک کالا فقط با کلید شخصی — بدون لاگین.
-
-    نمونه:
-      POST /api/quick-add
-      X-API-Key: <کلید>
-      {"product": "روغن", "quantity": "2", "unit": "عدد", "supplier": "یونس زاده"}
-    """
+    """ثبت یک کالا فقط با کلید شخصی — بدون لاگین."""
     user = user_from_api_token()
     if not user:
         return json_error("کلید معتبر نیست.", 401)
+
+    user_licensed = bool(user.is_licensed or is_admin_user(user))
+    p_count = Product.query.filter_by(owner_id=user.id).count()
+    if not user_licensed and p_count >= FREE_MAX_PRODUCTS:
+        return json_error(
+            "سقف ۵ محصول در نسخه آزمایشی تکمیل شده است. برای ثبت محصولات بیشتر باید لایسنس تهیه کنید.",
+            403,
+            {"license_locked": True},
+        )
 
     body = request.get_json(silent=True) or {}
 
@@ -1010,7 +1202,9 @@ def api_quick_add():
     if unit not in UNIT_TYPES:
         return json_error("واحد باید یکی از این‌ها باشد: " + "، ".join(UNIT_TYPES))
 
-    supplier, supplier_created = resolve_supplier(user, field("supplier"))
+    supplier, supplier_created, err = resolve_supplier(user, field("supplier"))
+    if err:
+        return json_error(err, 403, {"license_locked": True})
 
     product = Product(
         owner_id=user.id,
@@ -1051,11 +1245,110 @@ def api_suppliers():
     }
 
 
+@app.route("/api/license-status")
+def api_license_status():
+    """دریافت وضعیت لایسنس کاربر برای UI"""
+    limits = get_user_limits(current_user)
+    return {"success": True, "limits": limits}
+
+
+@app.route("/account/license", methods=["POST"])
+def activate_license():
+    """فعال‌سازی کلید لایسنس برای حساب کاربر جاری"""
+    key = request.form.get("license_key", "").strip()
+    if not key:
+        return json_error("لطفاً کلید لایسنس را وارد کنید.")
+
+    is_valid, tier, msg = verify_key(current_user, key)
+    if not is_valid:
+        return json_error(msg, 400)
+
+    user = db.session.get(User, current_user.id)
+    user.is_licensed = True
+    user.license_key = key.strip().upper()
+    user.licensed_at = datetime.now()
+    user.license_type = tier or "pro"
+    db.session.commit()
+
+    return {
+        "success": True,
+        "message": "✓ لایسنس با موفقیت فعال شد! محدودیت‌ها برای همیشه حذف شدند.",
+        "license_type": user.license_type,
+        "is_licensed": True,
+    }
+
+
+# ---------------------------------------------------------------------------
+#  پنل ادمین: تولید لایسنس داخل وب‌اپلیکیشن (مخصوص س.م.قتالی smq2458)
+# ---------------------------------------------------------------------------
+
+@app.route("/admin/license-generator")
+def admin_license_generator():
+    if not is_admin_user(current_user):
+        return json_error("دسترسی به این بخش فقط برای مدیر نرم‌افزار مجاز است.", 403)
+
+    # فهرست کاربران ثبت‌شده برای مشاهده وضعیت و صدور سریع لایسنس
+    all_users = User.query.order_by(User.id.desc()).all()
+    user_list = []
+    for u in all_users:
+        user_limits = get_user_limits(u)
+        user_list.append({
+            "id": u.id,
+            "username": u.username,
+            "user_code": user_limits["user_code"],
+            "is_licensed": user_limits["is_licensed"],
+            "supplier_count": user_limits["supplier_count"],
+            "product_count": user_limits["product_count"],
+            "license_type": u.license_type,
+            "license_key": u.license_key,
+        })
+
+    return render_template("admin_license.html", users=user_list)
+
+
+@app.route("/api/admin/generate-license", methods=["POST"])
+def api_admin_generate_license():
+    if not is_admin_user(current_user):
+        return json_error("دسترسی غیرمجاز.", 403)
+
+    ident = request.form.get("identifier", "").strip()
+    tier = request.form.get("tier", "PRO").strip().upper()
+    is_master = request.form.get("is_master") in ["true", "1", "on"]
+
+    if is_master:
+        key = generate_master_key(tier)
+        ident_display = "کلید سراسری (Universal Master Key)"
+        code_display = "همه دستگاه‌ها و حساب‌ها"
+    else:
+        if not ident:
+            return json_error("نام کاربری یا شناسه فعال‌سازی مشتری را وارد کنید.")
+        key = generate_key(ident, tier)
+        ident_display = ident
+        code_display = get_user_code(ident)
+
+    customer_msg = (
+        f"با سلام، لایسنس نسخه نامحدود «لیستیا» برای شما فعال شد:\n\n"
+        f"🔑 کلید لایسنس شما:\n{key}\n\n"
+        f"روش فعال‌سازی: وارد نرم‌افزار شوید، روی «نسخه آزمایشی» در منو کلیک کنید و کلید بالا را وارد نمایید.\n"
+        f"با آرزوی موفقیت · طراحی و توسعه: س.م.قتالی"
+    )
+
+    return {
+        "success": True,
+        "license_key": key,
+        "identifier": ident_display,
+        "user_code": code_display,
+        "tier": tier,
+        "customer_message": customer_msg,
+    }
+
+
 @app.route("/account/token", methods=["POST"])
 def regenerate_token():
     user = db.session.get(User, current_user.id)
     token = issue_api_token(user)
     return {"success": True, "token": token}
+
 
 @app.route("/account")
 def account():
@@ -1065,6 +1358,7 @@ def account():
     archived_count = Product.query.filter_by(owner_id=current_user.id, ordered=True).count()
 
     user = db.session.get(User, current_user.id)
+    limits = get_user_limits(user)
 
     return render_template(
         "account.html",
@@ -1073,6 +1367,7 @@ def account():
         archived_count=archived_count,
         api_token=ensure_api_token(user),
         api_base=request.url_root.rstrip("/"),
+        limits=limits,
     )
 
 
@@ -1118,20 +1413,18 @@ def change_password():
 
     user.password_hash = generate_password_hash(new_password)
     db.session.commit()
-    login_user(user)  # refresh the session after the credentials change
+    login_user(user)
     return {"success": True, "message": "رمز عبور عوض شد."}
 
 
 @app.route("/users")
 def users_redirect():
-    """Old users list is gone — nobody may see or manage other accounts."""
     return redirect(url_for("account"))
 
 
 @app.route("/users/<int:user_id>/delete", methods=["GET", "POST"])
 @app.route("/users/<int:user_id>", methods=["GET", "POST", "DELETE"])
 def users_gone(user_id):
-    """Legacy account-management endpoints are closed off to prevent abuse."""
     return json_error("این مسیر غیرفعال است.", 403)
 
 

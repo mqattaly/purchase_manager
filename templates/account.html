@@ -1,29 +1,57 @@
 {% extends "base.html" %}
-{% block title %}حساب من{% endblock %}
+{% block title %}حساب من · لیستیا{% endblock %}
 
 {% block content %}
 
   <div class="page-head">
     <div>
-      <h1 class="page-title">👤 حساب من</h1>
-      <div class="page-sub">اطلاعات حساب — اینجا میتونی حساب کاربریتو مدیریت کنی .</div>
+      <h1 class="page-title">👤 حساب کاربری</h1>
+      <div class="page-sub">مدیریت اطلاعات حساب و لایسنس نرم‌افزار لیستیا</div>
     </div>
+    {% if is_admin %}
+      <div>
+        <a href="/admin/license-generator" class="btn btn-accent">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m21 2-9.6 9.6M15.5 7.5l2.5 2.5M18 5l2 2"/></svg>
+          ورود به پنل صدور لایسنس
+        </a>
+      </div>
+    {% endif %}
   </div>
-
 
   <div class="card card-pad" style="margin-bottom:22px;">
     <div class="account-head">
       <div class="account-avatar">{{ current_user.username[:1]|upper }}</div>
       <div>
-        <div class="account-name" id="account-username">{{ current_user.username }}</div>
-        <div class="page-sub" style="margin-top:2px;">حساب فعال</div>
+        <div class="account-name" id="account-username">
+          {{ current_user.username }}
+          {% if is_admin %}
+            <span class="tag tag-accent" style="margin-right:6px; font-size:11px;">👑 حساب مدیر و توسعه‌دهنده</span>
+          {% endif %}
+        </div>
+        <div class="page-sub" style="margin-top:2px;">
+          {% if is_admin %}
+            <span class="tag tag-accent">👑 حساب مالک سیستم (س.م.قتالی - نامحدود)</span>
+          {% elif limits and limits.is_licensed %}
+            <span class="tag tag-success">💎 نسخه نامحدود (لایسنس فعال)</span>
+          {% else %}
+            <span class="tag tag-accent">نسخه آزمایشی لیستیا</span>
+          {% endif %}
+        </div>
       </div>
     </div>
 
     <div class="account-stats">
       <div class="account-stat">
-        <span class="account-stat-num mono">{{ supplier_count }}</span>
+        <span class="account-stat-num mono">
+          {{ supplier_count }}{% if limits and not limits.is_licensed and not is_admin %} / 1{% endif %}
+        </span>
         <span class="account-stat-label">تأمین‌کننده</span>
+      </div>
+      <div class="account-stat">
+        <span class="account-stat-num mono">
+          {{ active_count + archived_count }}{% if limits and not limits.is_licensed and not is_admin %} / 5{% endif %}
+        </span>
+        <span class="account-stat-label">کل محصولات</span>
       </div>
       <div class="account-stat">
         <span class="account-stat-num mono">{{ active_count }}</span>
@@ -33,6 +61,63 @@
         <span class="account-stat-num mono">{{ archived_count }}</span>
         <span class="account-stat-label">آرشیو شده</span>
       </div>
+    </div>
+  </div>
+
+  <!-- License Management Section -->
+  <div class="card card-pad" style="margin-bottom:22px;">
+    <h3 class="account-section-title">🔑 مدیریت لایسنس نرم‌افزار لیستیا</h3>
+    
+    {% if is_admin %}
+      <div class="license-active-box" style="background:linear-gradient(135deg, #FFF9EB, #FFF2D6); border-color:#F0D9A8;">
+        <div class="active-icon">👑</div>
+        <div>
+          <strong style="color:#7A5310; font-size:14.5px;">حساب کاربری مدیر سیستم و توسعه‌دهنده فعال است</strong>
+          <div class="page-sub" style="margin-top:3px; color:var(--ink-soft);">
+            شما می‌توانید به صورت نامحدود محصول و تأمین‌کننده ثبت کنید و برای دیگر کاربران لایسنس جدید تولید نمایید.
+          </div>
+          <div style="margin-top:10px;">
+            <a href="/admin/license-generator" class="btn btn-accent btn-sm">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m21 2-9.6 9.6M15.5 7.5l2.5 2.5M18 5l2 2"/></svg>
+              باز کردن پنل صدور لایسنس مشتریان
+            </a>
+          </div>
+        </div>
+      </div>
+    {% elif limits and limits.is_licensed %}
+      <div class="license-active-box">
+        <div class="active-icon">💎</div>
+        <div>
+          <strong style="color:var(--success); font-size:14.5px;">نسخه کامل و نامحدود لیستیا فعال است</strong>
+          <div class="page-sub" style="margin-top:3px;">
+            محدودیت تعداد تأمین‌کننده و تعداد محصول برای شما برداشته شده است.
+            {% if limits.license_key %}
+              <div style="margin-top:4px;" class="mono muted">کلید فعال: {{ limits.license_key }}</div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    {% else %}
+      <div class="page-sub" style="margin-bottom:14px;">
+        شما در حال استفاده از <strong>نسخه آزمایشی لیستیا</strong> هستید. در این نسخه می‌توانید ۱ تأمین‌کننده و ۵ محصول ثبت کنید و نامحدود با آنها کار کنید. برای ثبت تأمین‌کنندگان و محصولات بیشتر، لایسنس را فعال کنید.
+      </div>
+
+      <div class="field-label">۱. شناسه فعال‌سازی شما (جهت دریافت کلید لایسنس ارسال فرمایید):</div>
+      <div class="token-row" style="margin-bottom:16px;">
+        <input id="account-user-code" class="field mono" readonly value="{{ limits.user_code if limits else '' }}" style="flex:1; min-width:200px;">
+        <button type="button" class="btn btn-ghost" onclick="copyUserCodeField()">کپی شناسه</button>
+      </div>
+
+      <div class="field-label">۲. ثبت کلید لایسنس دریافتی:</div>
+      <form id="license-form" class="field-row" style="align-items:flex-start;">
+        <input id="license-key-input" class="field mono" style="flex:1; min-width:240px; text-transform:uppercase;" placeholder="LST-XXXX-XXXX-XXXX-XXXX" autocomplete="off" required>
+        <button id="license-btn" type="submit" class="btn btn-accent">فعال‌سازی لایسنس</button>
+      </form>
+      <div id="account-license-error" class="flash flash-error" style="display:none; margin-top:10px;"></div>
+    {% endif %}
+
+    <div class="developer-credit-box">
+      <span>نرم‌افزار لیستیا · طراحی و توسعه: <strong>س.م.قتالی</strong></span>
     </div>
   </div>
 
@@ -56,9 +141,9 @@
   </div>
 
   <div class="card card-pad" style="margin-bottom:22px;">
-    <h3 class="account-section-title">🔑 ثبت از گوشی (Shortcuts آیفون)</h3>
+    <h3 class="account-section-title">📱 ثبت سریع از بیرون اپ (Shortcuts آیفون و سیری)</h3>
     <div class="page-sub" style="margin-bottom:14px;">
-      با این کلید می‌توانی بدون باز کردن اپ و بدون لاگین، از میان‌بر آیفون یا سیری کالا ثبت کنی.
+      با این کلید می‌توانی بدون باز کردن اپ و بدون لاگین، از میان‌بر آیفون کالا ثبت کنی.
       کلید را جای امن نگه دار؛ هرکس داشته باشد می‌تواند در حساب تو ثبت کند.
     </div>
 
@@ -78,7 +163,7 @@
 
     <div class="page-sub" style="margin-top:12px;">
       پارامترها: <code>product</code> (الزامی) · <code>quantity</code> (پیش‌فرض ۱) ·
-      <code>unit</code> (عدد/کارتن/بسته/گونی/کیلو) · <code>supplier</code> (نام یا شناسه؛ نبود، ساخته می‌شود) ·
+      <code>unit</code> (عدد/کارتن/بسته/گونی/کیلو) · <code>supplier</code> (نام یا شناسه) ·
       <code>description</code>
     </div>
   </div>
@@ -88,7 +173,7 @@
     <div class="page-sub" style="margin-bottom:14px;">با خروج، برای دیدن اطلاعاتت باید دوباره وارد شوی.</div>
     <a href="/logout" class="btn btn-ghost">
       <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
-      خروج
+      خروج از حساب
     </a>
   </div>
 
@@ -108,6 +193,43 @@
           btn.disabled = false;
           showError("خطا در ارتباط با سرور");
         });
+    }
+
+    const licForm = document.getElementById("license-form");
+    if (licForm) {
+      licForm.addEventListener("submit", function (e) {
+        e.preventDefault();
+        const key = document.getElementById("license-key-input").value.trim();
+        const btn = document.getElementById("license-btn");
+        const errBox = document.getElementById("account-license-error");
+        errBox.style.display = "none";
+
+        if (!key) return;
+
+        btn.disabled = true;
+        App.request("/account/license", { form: { license_key: key } })
+          .then(function (result) {
+            btn.disabled = false;
+            if (!result.ok) {
+              errBox.textContent = (result.data && result.data.message) || "کلید لایسنس نامعتبر است.";
+              errBox.style.display = "block";
+              showError(errBox.textContent);
+              return;
+            }
+            showSuccess(result.data.message || "لایسنس با موفقیت فعال شد!");
+            setTimeout(function () {
+              window.location.reload();
+            }, 1200);
+          })
+          .catch(function () {
+            btn.disabled = false;
+            showError("خطا در ارتباط با سرور");
+          });
+      });
+    }
+
+    function copyUserCodeField() {
+      copyField("account-user-code", "شناسه فعال‌سازی کپی شد");
     }
 
     document.getElementById("username-form").addEventListener("submit", function (e) {
@@ -148,6 +270,7 @@
 
     function copyField(id, done) {
       const el = document.getElementById(id);
+      if (!el) return;
       el.select();
       el.setSelectionRange(0, 99999);
       if (navigator.clipboard) navigator.clipboard.writeText(el.value).catch(function () {});

@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#142430">
-  <title>{% block title %}مدیریت خرید{% endblock %}</title>
+  <title>{% block title %}لیستیا{% endblock %}</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -20,10 +20,10 @@
 
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-mark">خ</div>
+        <div class="brand-mark">ل</div>
         <div class="brand-text">
-          <span class="brand-title">مدیریت خرید</span>
-          <span class="brand-sub">لیست خرید فروشگاه</span>
+          <span class="brand-title">لیستیا</span>
+          <span class="brand-sub">مدیریت سفارش و خرید</span>
         </div>
       </div>
 
@@ -59,7 +59,53 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.5-6 8-6s8 2 8 6"/></svg>
           حساب من
         </a>
+
+        {% if is_admin %}
+          <div style="margin-top: 10px; border-top: 1px solid rgba(255,255,255,.08); padding-top: 8px;">
+            <span class="nav-label" style="color:var(--accent);">مدیریت سیستم</span>
+            <a href="/admin/license-generator" class="{{ 'active' if request.path == '/admin/license-generator' }}" style="color:#FFE8B8;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="7.5" cy="15.5" r="4.5"/><path d="m21 2-9.6 9.6M15.5 7.5l2.5 2.5M18 5l2 2"/></svg>
+              تولید لایسنس
+            </a>
+          </div>
+        {% endif %}
       </nav>
+
+      {% if current_user.is_authenticated and limits %}
+        <div class="sidebar-license-box">
+          {% if is_admin %}
+            <div class="sidebar-license licensed" style="background:rgba(224,160,48,.16); border-color:rgba(224,160,48,.4);">
+              <span class="lic-icon">👑</span>
+              <div class="lic-info">
+                <span class="lic-title" style="color:#FFE4A0;">حساب مدیر و توسعه‌دهنده</span>
+                <span class="lic-sub" style="color:#EBD4A8;">س.م.قتالی (نامحدود)</span>
+              </div>
+            </div>
+          {% elif limits.is_licensed %}
+            <div class="sidebar-license licensed">
+              <span class="lic-icon">💎</span>
+              <div class="lic-info">
+                <span class="lic-title">نسخه کامل لیستیا</span>
+                <span class="lic-sub">لایسنس دائمی فعال</span>
+              </div>
+            </div>
+          {% else %}
+            <div class="sidebar-license trial" onclick="openLicenseModal()" role="button" tabindex="0" title="برای ارتقا کلیک کنید">
+              <div class="lic-top">
+                <span class="lic-badge">نسخه آزمایشی</span>
+                <span class="lic-action-text">خرید لایسنس ↗</span>
+              </div>
+              <div class="lic-progress-row">
+                <span>تأمین‌کننده: {{ limits.supplier_count }}/1</span>
+                <span>کالا: {{ limits.product_count }}/5</span>
+              </div>
+              <div class="lic-bar">
+                <div class="lic-bar-fill" style="width: {{ [((limits.product_count / 5) * 100)|int, 100]|min }}%;"></div>
+              </div>
+            </div>
+          {% endif %}
+        </div>
+      {% endif %}
 
       <div class="sidebar-user">
         {% if current_user.is_authenticated %}
@@ -71,7 +117,7 @@
         </a>
       </div>
 
-      <div class="sidebar-footer">طراحی و توسعه س.م.قتالی</div>
+      <div class="sidebar-footer">طراحی و توسعه: س.م.قتالی</div>
     </aside>
 
     <main class="content">
@@ -110,6 +156,76 @@
       {% block content %}{% endblock %}
     </main>
 
+  </div>
+
+  <!-- License Activation Modal -->
+  <div id="license-modal" class="modal-backdrop" hidden>
+    <div class="modal-card">
+      <div class="modal-head">
+        <div class="modal-title-group">
+          <span class="modal-icon">🔑</span>
+          <div>
+            <h2 class="modal-title">فعال‌سازی لایسنس لیستیا</h2>
+            <div class="modal-sub">حذف محدودیت ثبت تأمین‌کننده و کالا</div>
+          </div>
+        </div>
+        <button type="button" class="modal-close" onclick="closeLicenseModal()" aria-label="بستن">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="license-info-card">
+          <div class="license-info-row">
+            <span class="lic-label">وضعیت حساب:</span>
+            {% if limits and limits.is_licensed %}
+              <span class="tag tag-success">✓ لایسنس فعال (نامحدود)</span>
+            {% else %}
+              <span class="tag tag-accent">نسخه آزمایشی (۱ تأمین‌کننده / ۵ محصول)</span>
+            {% endif %}
+          </div>
+
+          {% if limits and not limits.is_licensed %}
+            <div class="license-quota-box">
+              <div class="quota-item">
+                <span class="quota-name">تأمین‌کننده‌های ثبت‌شده:</span>
+                <span class="quota-val mono">{{ limits.supplier_count }} / 1</span>
+              </div>
+              <div class="quota-item">
+                <span class="quota-name">محصولات ثبت‌شده:</span>
+                <span class="quota-val mono">{{ limits.product_count }} / 5</span>
+              </div>
+            </div>
+            <div class="license-notice">
+              💡 شما می‌توانید همیشه با این ۱ تأمین‌کننده و ۵ محصول فعلی کار کنید (سفارش‌گذاری، ویرایش و مدیریت). برای اضافه کردن تأمین‌کننده یا کالای بیشتر باید لایسنس تهیه نمایید.
+            </div>
+          {% endif %}
+        </div>
+
+        <div class="field-group" style="margin-top: 16px;">
+          <label class="field-label" for="modal-user-code">شناسه فعال‌سازی اختصاصی شما (جهت ارسال به پشتیبانی):</label>
+          <div class="token-row">
+            <input id="modal-user-code" class="field mono" readonly value="{{ limits.user_code if limits else '' }}" style="flex:1;">
+            <button type="button" class="btn btn-ghost btn-sm" onclick="copyUserCode()">کپی شناسه</button>
+          </div>
+        </div>
+
+        <form id="modal-license-form" style="margin-top: 18px;" onsubmit="handleLicenseSubmit(event)">
+          <div class="field-group">
+            <label class="field-label" for="modal-license-key">کلید لایسنس دریافتی را اینجا وارد کنید:</label>
+            <input id="modal-license-key" class="field mono" placeholder="مثال: LST-XXXX-XXXX-XXXX-XXXX" required autocomplete="off" style="text-transform:uppercase;">
+          </div>
+          <div id="modal-license-error" class="flash flash-error" style="display:none; margin-top:10px;"></div>
+          <div id="modal-license-success" class="flash flash-success" style="display:none; margin-top:10px;"></div>
+          <button type="submit" id="modal-license-btn" class="btn btn-accent btn-block" style="margin-top: 14px;">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            ثبت و فعال‌سازی لایسنس
+          </button>
+        </form>
+      </div>
+
+      <div class="modal-foot">
+        <span>طراحی و توسعه: س.م.قتالی</span>
+      </div>
+    </div>
   </div>
 
 </body>

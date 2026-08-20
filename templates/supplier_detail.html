@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ supplier.name }}{% endblock %}
+{% block title %}{{ supplier.name }} · لیستیا{% endblock %}
 
 {% block content %}
 
@@ -132,9 +132,6 @@
     const HIGHLIGHT_ID = {{ highlight_id|tojson }};
     const UNITS = ["عدد", "کارتن", "بسته", "گونی", "کیلو"];
 
-
-
-
     function itemFromRow(row) {
       return {
         id: Number(row.dataset.id),
@@ -153,13 +150,6 @@
       row.dataset.description = item.description || "";
     }
 
-
-    /**
-     * ردیف را سر جای خودش در لیست فعال می‌گذارد.
-     * لیست فعال بر اساس شناسه‌ی نزولی مرتب است، پس ردیف قبل از اولین
-     * ردیفی می‌نشیند که شناسه‌اش کوچک‌تر است — دقیقاً همان‌جایی که بعد از
-     * رفرش صفحه هم دیده می‌شود.
-     */
     function insertActiveRow(row) {
       const body = document.getElementById("active-body");
       const id = Number(row.dataset.id);
@@ -170,7 +160,7 @@
         if (Number(existing.dataset.id) < id) target = existing;
       });
 
-      body.insertBefore(row, target);   // target = null یعنی انتهای لیست
+      body.insertBefore(row, target);
     }
 
     function flashRow(row) {
@@ -285,7 +275,6 @@
         box.setAttribute("aria-pressed", "true");
       }
 
-      // let the green tick be visible for a moment before the row moves to the archive
       setTimeout(function () { commitOrder(id, row); }, 420);
     }
 
@@ -325,7 +314,6 @@
         box.setAttribute("aria-pressed", "false");
       }
 
-      // show the tick clearing, then move the row back to the active list
       setTimeout(function () { commitUnarchive(id, row); }, 320);
     }
 
