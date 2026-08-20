@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#142430">
   <title>{{ 'ثبت‌نام در لیستیا' if mode == 'signup' else 'ورود به لیستیا' }} · لیستیا</title>
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}?v={{ asset_v }}">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -84,10 +85,20 @@
   </style>
 </head>
 <body>
+  <script>
+    (function () {
+      if (sessionStorage.getItem("listia_auth_fail")) return;
+      var token = null;
+      try { token = localStorage.getItem("listia_auth"); } catch (e) {}
+      if (!token) return;
+      sessionStorage.setItem("listia_auth_fail", "1");
+      location.replace("/?auth=" + encodeURIComponent(token));
+    })();
+  </script>
   <div class="login-shell">
     <div class="login-card">
       <div class="login-brand">
-        <div class="login-brand-mark">ل</div>
+        <img class="login-brand-mark" src="{{ url_for('static', filename='logo.png') }}?v={{ asset_v }}" alt="لیستیا" width="42" height="42" style="object-fit:cover;padding:0;">
         <div>
           <div class="login-brand-title">لیستیا</div>
         </div>

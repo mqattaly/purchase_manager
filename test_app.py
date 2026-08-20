@@ -98,6 +98,9 @@ class ListiaTestCase(unittest.TestCase):
         html = res.get_data(as_text=True)
         self.assertIn("داشبورد", html)
         self.assertIn("آخرین سفارش‌های فعال", html)
+        self.assertIn("supplier-home-card", html)
+        self.assertIn("تأمین کننده الف", html)
+        self.assertIn('id="stat-active"', html)
 
         # Edit product: change name and change supplier to Supplier B
         res = self.client.post(f"/product/{p_id}/edit", data={

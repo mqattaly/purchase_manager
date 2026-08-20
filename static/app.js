@@ -79,6 +79,13 @@
       delete opts.form;
     }
 
+    try {
+      const token = window.localStorage.getItem("listia_auth");
+      if (token && String(url).indexOf("auth=") < 0) {
+        url += (String(url).indexOf("?") >= 0 ? "&" : "?") + "auth=" + encodeURIComponent(token);
+      }
+    } catch (err) {}
+
     return fetch(url, opts).then(function (res) {
       return res
         .json()
@@ -716,6 +723,10 @@
             "» اضافه شد",
             "success"
           );
+
+          if (typeof window.DashLive !== "undefined") {
+            window.DashLive.addSupplier(result.data.id, result.data.name);
+          }
         })
         .catch(() => {
           option.remove();
@@ -969,6 +980,10 @@
               liveRow,
               "saved"
             );
+          }
+
+          if (typeof window.DashLive !== "undefined") {
+            window.DashLive.onProductSaved(saved);
           }
 
           this.dupCache.delete(
@@ -1510,6 +1525,7 @@
       if (!row) return;
 
       const failed = row.dataset.state === "failed";
+      const supplierId = row.dataset.supplierId;
       const next = row.nextElementSibling;
       const parent = row.parentNode;
       const backup = row.outerHTML;
@@ -1540,6 +1556,9 @@
         .then((result) => {
           if (result.ok) {
             this.saves.delete(key);
+            if (typeof window.DashLive !== "undefined") {
+              window.DashLive.onProductRemoved(id, supplierId);
+            }
             return;
           }
 
@@ -1809,6 +1828,112 @@
   App.animateRow = animateRow;
   App.GlobalSearch = GlobalSearch;
   App.QuickAdd = QuickAdd;
+
+  const DashLive = {
+    bump(el, delta) {
+      if (!el) return 0;
+      const next = Math.max(0, (parseInt(el.textContent, 10) || 0) + delta);
+      el.textContent = next;
+      return next;
+    },
+
+    setActive(n) {
+      const el = document.getElementById("stat-active");
+      if (el) el.textContent = n;
+      const total = document.getElementById("dash-recent-total");
+      if (total) total.textContent = n;
+    },
+
+    addSupplier(id, name) {
+      if (typeof DASH_SUPPLIERS !== "undefined") {
+        DASH_SUPPLIERS.push({ id: id, name: name });
+      }
+      const grid = document.getElementById("dash-supplier-grid");
+      const empty = document.getElementById("dash-supplier-empty");
+      if (!grid) return;
+      if (grid.querySelector('[data-supplier-id="' + id + '"]')) return;
+
+      const card = document.createElement("a");
+      card.href = "/supplier/" + id;
+      card.className = "supplier-home-card";
+      card.dataset.supplierId = String(id);
+      card.innerHTML =
+        '<span class="supplier-card-avatar">' + escapeHtml(String(name || "ت").slice(0, 1)) + "</span>" +
+        '<span class="supplier-card-copy"><strong>' + escapeHtml(name) + "</strong><small>سفارش فعال</small></span>" +
+        '<span class="supplier-card-count" data-count>0</span>' +
+        '<svg class="supplier-card-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>';
+      grid.appendChild(card);
+      grid.style.display = "";
+      if (empty) empty.style.display = "none";
+      this.bump(document.getElementById("stat-suppliers"), 1);
+    },
+
+    bumpSupplier(supplierId, delta) {
+      const card = document.querySelector('#dash-supplier-grid [data-supplier-id="' + supplierId + '"] [data-count]');
+      if (card) this.bump(card, delta);
+    },
+
+    onProductSaved(product) {
+      this.bump(document.getElementById("stat-active"), 1);
+      const total = document.getElementById("dash-recent-total");
+      if (total) this.bump(total, 1);
+      this.bumpSupplier(product.supplier_id, 1);
+      this.prependRecent(product);
+    },
+
+    onProductRemoved(id, supplierId) {
+      this.bump(document.getElementById("stat-active"), -1);
+      const total = document.getElementById("dash-recent-total");
+      if (total) this.bump(total, -1);
+      if (supplierId) this.bumpSupplier(supplierId, -1);
+      const row = document.querySelector('#dash-recent-body tr[data-id="' + id + '"]');
+      if (row) {
+        row.remove();
+        if (typeof updateDashEmpty === "function") updateDashEmpty();
+      }
+    },
+
+    onOrdered(id, supplierId) {
+      this.bump(document.getElementById("stat-active"), -1);
+      this.bump(document.getElementById("stat-archived"), 1);
+      const total = document.getElementById("dash-recent-total");
+      if (total) this.bump(total, -1);
+      if (supplierId) this.bumpSupplier(supplierId, -1);
+    },
+
+    prependRecent(product) {
+      const body = document.getElementById("dash-recent-body");
+      if (!body) return;
+      if (body.querySelector('tr[data-id="' + product.id + '"]')) return;
+      const row = document.createElement("tr");
+      row.dataset.id = product.id;
+      row.dataset.supplierId = product.supplier_id;
+      row.dataset.supplierName = product.supplier_name || "";
+      row.dataset.productName = product.product_name || "";
+      row.dataset.quantity = product.quantity || "";
+      row.dataset.unit = product.unit || "";
+      row.dataset.description = product.description || "";
+      row.className = "row-link";
+      if (typeof paintDashRow === "function") {
+        paintDashRow(row, {
+          supplier_id: product.supplier_id,
+          supplier_name: product.supplier_name,
+          product_name: product.product_name,
+          quantity: product.quantity,
+          unit: product.unit,
+          description: product.description || ""
+        });
+      }
+      body.insertBefore(row, body.firstChild);
+      while (body.querySelectorAll("tr").length > 15) {
+        body.lastElementChild.remove();
+      }
+      if (typeof updateDashEmpty === "function") updateDashEmpty();
+      if (typeof animateRow === "function") animateRow(row);
+    }
+  };
+
+  window.DashLive = DashLive;
 
   window.App = App;
   window.escapeHtml = escapeHtml;

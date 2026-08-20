@@ -5,6 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#142430">
   <title>{% block title %}لیستیا{% endblock %}</title>
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}?v={{ asset_v }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='logo.png') }}?v={{ asset_v }}">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -15,12 +17,43 @@
   <script src="{{ url_for('static', filename='app.js') }}?v={{ asset_v }}" defer></script>
 </head>
 <body>
+  <script>
+    (function () {
+      function token() {
+        try { return localStorage.getItem("listia_auth"); } catch (e) { return null; }
+      }
+      var authed = {{ 'true' if current_user.is_authenticated else 'false' }};
+      var t = token();
+      if (!authed && t) {
+        var u = new URL(location.href);
+        if (!u.searchParams.get("auth")) {
+          u.searchParams.set("auth", t);
+          location.replace(u.pathname + u.search + u.hash);
+          return;
+        }
+      }
+      document.addEventListener("click", function (e) {
+        var a = e.target.closest && e.target.closest("a[href]");
+        if (!a) return;
+        var tok = token();
+        if (!tok) return;
+        var href = a.getAttribute("href");
+        if (!href || href.charAt(0) === "#" || href.indexOf("javascript:") === 0) return;
+        var dest;
+        try { dest = new URL(a.href, location.origin); } catch (err) { return; }
+        if (dest.origin !== location.origin) return;
+        if (dest.searchParams.get("auth")) return;
+        dest.searchParams.set("auth", tok);
+        a.href = dest.pathname + dest.search + dest.hash;
+      }, true);
+    })();
+  </script>
 
   <div class="shell">
 
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-mark">ل</div>
+        <img class="brand-logo" src="{{ url_for('static', filename='logo.png') }}?v={{ asset_v }}" alt="لیستیا" width="38" height="38">
         <div class="brand-text">
           <span class="brand-title">لیستیا</span>
           <span class="brand-sub">مدیریت سفارش و خرید</span>
@@ -43,11 +76,6 @@
         <a href="/suppliers" class="{{ 'active' if request.path.startswith('/supplier') }}">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21V9l7-4 7 4v12"/><path d="M10 21v-6h4v6M17 21V11l4-2v12"/></svg>
           تأمین‌کننده‌ها
-        </a>
-
-        <a href="/search" class="{{ 'active' if request.path == '/search' }}">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-          جستجوی محصول
         </a>
 
         <a href="/import" class="{{ 'active' if request.path == '/import' }}">

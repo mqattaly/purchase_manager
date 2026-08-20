@@ -5,7 +5,10 @@ from datetime import date, datetime, timedelta
 from dotenv import load_dotenv
 load_dotenv()
 
-from flask import Flask, render_template, request, redirect, url_for, send_file
+from flask import Flask, g, render_template, request, redirect, url_for, send_file, make_response
+from urllib.parse import urlparse
+import time
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import (
     LoginManager,
@@ -36,6 +39,12 @@ os.makedirs(INSTANCE_DIR, exist_ok=True)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
+app.config["SESSION_COOKIE_SAMESITE"] = "None"
+app.config["SESSION_COOKIE_SECURE"] = True
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["REMEMBER_COOKIE_SAMESITE"] = "None"
+app.config["REMEMBER_COOKIE_SECURE"] = True
+app.config["REMEMBER_COOKIE_HTTPONLY"] = True
 
 db_url = os.environ.get("DATABASE_URL")
 if db_url:
@@ -46,6 +55,7 @@ else:
     app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///" + os.path.join(INSTANCE_DIR, "purchase.db")
 
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
 # Static files are versioned with ?v=<hash>, so they can be cached hard.
 app.config["SEND_FILE_MAX_AGE_DEFAULT"] = 60 * 60 * 24 * 365
 
@@ -53,15 +63,81 @@ if os.environ.get("VERCEL"):
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"poolclass": NullPool}
 
 
+AUTH_COOKIE = "listia_auth"
+AUTH_MAX_AGE = 60 * 60 * 24 * 30
+
+
+def _auth_serializer():
+    return URLSafeTimedSerializer(app.secret_key, salt="listia-auth")
+
+
+def issue_auth_token(user_id):
+    return _auth_serializer().dumps({"uid": int(user_id)})
+
+
+def user_from_auth_token(token):
+    if not token:
+        return None
+    try:
+        data = _auth_serializer().loads(token, max_age=AUTH_MAX_AGE)
+        return db.session.get(User, int(data["uid"]))
+    except (BadSignature, SignatureExpired, KeyError, TypeError, ValueError):
+        return None
+
+
+def attach_auth_cookie(response, user_id):
+    token = issue_auth_token(user_id)
+    kwargs = dict(
+        key=AUTH_COOKIE,
+        value=token,
+        max_age=AUTH_MAX_AGE,
+        httponly=False,
+        secure=True,
+        samesite="None",
+        path="/",
+    )
+    try:
+        response.set_cookie(partitioned=True, **kwargs)
+    except TypeError:
+        response.set_cookie(**kwargs)
+        cookies = response.headers.getlist("Set-Cookie")
+        response.headers.remove("Set-Cookie")
+        for cookie in cookies:
+            if AUTH_COOKIE in cookie and "Partitioned" not in cookie:
+                cookie += "; Partitioned"
+            response.headers.add("Set-Cookie", cookie)
+    return token
+
+
+def login_handoff(user):
+    login_user(user, remember=True)
+    token = issue_auth_token(user.id)
+    resp = make_response(render_template("login_handoff.html", token=token))
+    attach_auth_cookie(resp, user.id)
+    return resp
+
+
 @app.after_request
 def _allow_iframe_preview(response):
     # Arena shows the app inside an iframe; don't block embedding.
     response.headers.pop("X-Frame-Options", None)
     response.headers["Content-Security-Policy"] = "frame-ancestors *"
-    host = (request.host or "").lower()
-    if "e2b.app" in host:
-        app.config["SESSION_COOKIE_SAMESITE"] = "None"
-        app.config["SESSION_COOKIE_SECURE"] = True
+    cookies = response.headers.getlist("Set-Cookie")
+    if cookies:
+        response.headers.remove("Set-Cookie")
+        for cookie in cookies:
+            patched = (
+                cookie.replace("SameSite=Lax", "SameSite=None")
+                .replace("SameSite=Strict", "SameSite=None")
+                .replace("samesite=lax", "SameSite=None")
+            )
+            if "SameSite=" not in patched and "samesite=" not in patched.lower():
+                patched += "; SameSite=None"
+            if "Secure" not in patched:
+                patched += "; Secure"
+            if "Partitioned" not in patched:
+                patched += "; Partitioned"
+            response.headers.add("Set-Cookie", patched)
     return response
 
 db = SQLAlchemy(app)
@@ -82,6 +158,37 @@ def normalize_name(name):
 
 def wants_json():
     return request.headers.get("X-Requested-With") == "fetch"
+
+
+
+def safe_redirect(fallback):
+    ref = request.referrer
+    if not ref:
+        return redirect(fallback)
+    parsed = urlparse(ref)
+    if parsed.netloc and parsed.netloc != request.host:
+        return redirect(fallback)
+    return redirect(ref)
+
+
+def cached_limits():
+    if not hasattr(g, "limits"):
+        g.limits = get_user_limits(current_user) if current_user.is_authenticated else None
+    return g.limits
+
+
+_login_attempts = {}
+
+
+def login_is_throttled(ip):
+    now = time.time()
+    stamps = [t for t in _login_attempts.get(ip, []) if now - t < 300]
+    _login_attempts[ip] = stamps
+    return len(stamps) >= 12
+
+
+def record_login_fail(ip):
+    _login_attempts.setdefault(ip, []).append(time.time())
 
 
 def shamsi_label(value):
@@ -272,7 +379,10 @@ def json_error(message, status=400, extra=None):
 
 def user_suppliers():
     """All suppliers of the logged-in user, alphabetically."""
-    return Supplier.query.filter_by(owner_id=current_user.id).order_by(Supplier.name).all()
+    if hasattr(g, "suppliers"):
+        return g.suppliers
+    g.suppliers = Supplier.query.filter_by(owner_id=current_user.id).order_by(Supplier.name).all()
+    return g.suppliers
 
 
 def user_products(**filters):
@@ -309,10 +419,10 @@ def read_product_form():
     """Validate the shared product form. Returns (fields, error)."""
     fields = {
         "supplier_id": request.form.get("supplier", "") or request.form.get("supplier_id", ""),
-        "product_name": request.form.get("product", "").strip(),
-        "quantity": request.form.get("quantity", "").strip(),
+        "product_name": request.form.get("product", "").strip()[:300],
+        "quantity": request.form.get("quantity", "").strip()[:50],
         "unit": request.form.get("unit", ""),
-        "description": request.form.get("description", "").strip(),
+        "description": request.form.get("description", "").strip()[:500],
     }
 
     if not fields["product_name"]:
@@ -472,8 +582,8 @@ ASSET_VERSION = _asset_version()
 
 @app.context_processor
 def inject_template_globals():
-    limits = get_user_limits(current_user) if current_user.is_authenticated else None
-    admin = is_admin_user(current_user) if current_user.is_authenticated else False
+    limits = cached_limits()
+    admin = bool(limits and limits.get("is_admin"))
     return {
         "asset_v": ASSET_VERSION,
         "unit_types": UNIT_TYPES,
@@ -496,6 +606,12 @@ def _prepare_request():
             _schema_ready = True
         except Exception:
             pass
+
+    if not current_user.is_authenticated:
+        token = request.cookies.get(AUTH_COOKIE) or request.args.get("auth") or request.form.get("auth")
+        user = user_from_auth_token(token)
+        if user:
+            login_user(user, remember=True)
 
     allowed = {"login", "signup", "static", "api_quick_add", "api_suppliers"}
     if request.endpoint in allowed or request.endpoint is None:
@@ -525,7 +641,14 @@ def home():
         user_products(ordered=False).order_by(Product.id.desc()).limit(15).all()
     )
 
-    limits = get_user_limits(current_user)
+    active_by_supplier = dict(
+        db.session.query(Product.supplier_id, db.func.count(Product.id))
+        .filter(Product.owner_id == current_user.id, Product.ordered.is_(False))
+        .group_by(Product.supplier_id)
+        .all()
+    )
+
+    limits = cached_limits()
 
     return render_template(
         "dashboard.html",
@@ -534,6 +657,7 @@ def home():
         active_count=active_count,
         archived_count=archived_count,
         recent=recent,
+        active_by_supplier=active_by_supplier,
         limits=limits,
     )
 
@@ -544,17 +668,21 @@ def login():
         return redirect("/")
 
     if request.method == "POST":
-        username = request.form.get("username", "").strip()
+        ip = request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
+        if login_is_throttled(ip):
+            return render_template("login.html", mode="login", error="تلاش‌های ورود زیاد است. چند دقیقه بعد دوباره امتحان کنید.")
+        username = request.form.get("username", "").strip()[:100]
         password = request.form.get("password", "")
         user = User.query.filter_by(username=username).first()
         if user and check_password_hash(user.password_hash, password):
+            _login_attempts.pop(ip, None)
             if user.username.lower() in ADMIN_USERNAMES:
                 user.is_admin = True
                 user.is_licensed = True
                 user.license_type = "UNLIMITED"
                 db.session.commit()
-            login_user(user)
-            return redirect("/")
+            return login_handoff(user)
+        record_login_fail(ip)
         return render_template("login.html", mode="login", error="نام کاربری یا رمز عبور اشتباه است.")
 
     return render_template("login.html", mode="login", error=None)
@@ -597,8 +725,7 @@ def signup():
         db.session.add(user)
         db.session.commit()
         claim_orphaned_data(user.id)
-        login_user(user)
-        return redirect("/")
+        return login_handoff(user)
 
     return render_template("login.html", mode="signup", error=None)
 
@@ -606,7 +733,9 @@ def signup():
 @app.route("/logout")
 def logout():
     logout_user()
-    return redirect(url_for("login"))
+    resp = make_response(render_template("logout_handoff.html"))
+    resp.delete_cookie(AUTH_COOKIE, path="/")
+    return resp
 
 
 @app.route("/search")
@@ -616,73 +745,45 @@ def search():
 
 @app.route("/new-purchase", methods=["GET", "POST"])
 def new_purchase():
-    limits = get_user_limits(current_user)
+    if request.method == "GET":
+        return redirect("/")
 
-    if request.method == "POST":
-        if not limits["can_add_product"]:
-            msg = "سقف نسخه آزمایشی (۵ محصول) تکمیل شده است. برای ثبت محصول جدید باید لایسنس لیستیا را تهیه کنید."
-            if limits.get("is_expired"):
-                msg = "مدت زمان لایسنس شما به پایان رسیده است. جهت ثبت محصولات بیشتر، لایسنس خود را تمدید فرمایید."
-            if wants_json():
-                return json_error(msg, 403, {"license_locked": True})
-            return render_template(
-                "new_purchase.html",
-                suppliers=user_suppliers(),
-                message=msg,
-                success=False,
-                limits=limits,
-            )
+    limits = cached_limits()
+    if not limits["can_add_product"]:
+        msg = "سقف نسخه آزمایشی (۵ محصول) تکمیل شده است. برای ثبت محصول جدید باید لایسنس لیستیا را تهیه کنید."
+        if limits.get("is_expired"):
+            msg = "مدت زمان لایسنس شما به پایان رسیده است. جهت ثبت محصولات بیشتر، لایسنس خود را تمدید فرمایید."
+        return json_error(msg, 403, {"license_locked": True})
 
-        fields, error = read_product_form()
+    fields, error = read_product_form()
+    supplier = None
+    if not fields["supplier_id"]:
+        error = "تأمین‌کننده را انتخاب کنید."
+    else:
+        supplier = Supplier.query.filter_by(
+            id=fields["supplier_id"], owner_id=current_user.id
+        ).first()
+        if not supplier:
+            error = "تأمین‌کننده معتبر نیست."
 
-        supplier = None
-        if not fields["supplier_id"]:
-            error = "تأمین‌کننده را انتخاب کنید."
-        else:
-            supplier = Supplier.query.filter_by(
-                id=fields["supplier_id"], owner_id=current_user.id
-            ).first()
-            if not supplier:
-                error = "تأمین‌کننده معتبر نیست."
+    if error:
+        return json_error(error)
 
-        if error:
-            if wants_json():
-                return json_error(error)
-            return render_template(
-                "new_purchase.html",
-                suppliers=user_suppliers(),
-                message=error,
-                success=False,
-                limits=limits,
-            )
-
-        new_product = Product(
-            owner_id=current_user.id,
-            supplier_id=supplier.id,
-            product_name=fields["product_name"],
-            quantity=fields["quantity"],
-            unit=fields["unit"],
-            description=fields["description"],
-        )
-        db.session.add(new_product)
-        db.session.commit()
-
-        if wants_json():
-            return {
-                "success": True,
-                "message": "خرید ثبت شد",
-                "product": product_payload(new_product, supplier.name),
-            }
-
-        return redirect("/new-purchase")
-
-    return render_template(
-        "new_purchase.html",
-        suppliers=user_suppliers(),
-        product_names=recent_product_names(),
-        message=None,
-        limits=limits,
+    new_product = Product(
+        owner_id=current_user.id,
+        supplier_id=supplier.id,
+        product_name=fields["product_name"],
+        quantity=fields["quantity"],
+        unit=fields["unit"],
+        description=fields["description"],
     )
+    db.session.add(new_product)
+    db.session.commit()
+    return {
+        "success": True,
+        "message": "خرید ثبت شد",
+        "product": product_payload(new_product, supplier.name),
+    }
 
 
 @app.route("/check-duplicate")
@@ -728,7 +829,7 @@ def toggle_order(product_id):
 
     if wants_json():
         return {"success": True, "product": product_payload(product)}
-    return redirect(request.referrer or "/purchases")
+    return safe_redirect("/purchases")
 
 
 @app.route("/unarchive/<int:product_id>", methods=["POST"])
@@ -740,12 +841,14 @@ def unarchive_product(product_id):
 
     if wants_json():
         return {"success": True, "product": product_payload(product)}
-    return redirect(request.referrer or f"/supplier/{product.supplier_id}")
+    return safe_redirect(f"/supplier/{product.supplier_id}")
 
 
 @app.route("/product/<int:product_id>/edit", methods=["GET", "POST"])
 def edit_product(product_id):
     product = owned_product_or_404(product_id)
+    if request.method == "GET":
+        return redirect(f"/supplier/{product.supplier_id}?highlight={product.id}")
     suppliers = user_suppliers()
 
     if request.method == "POST":
@@ -758,7 +861,7 @@ def edit_product(product_id):
         if not name or not quantity or unit not in UNIT_TYPES:
             if wants_json():
                 return json_error("اطلاعات محصول کامل نیست.")
-            return render_template("product_edit.html", product=product, suppliers=suppliers)
+            return json_error("اطلاعات محصول کامل نیست.")
 
         if supplier_id:
             try:
@@ -778,7 +881,7 @@ def edit_product(product_id):
             return {"success": True, "product": product_payload(product)}
         return redirect(f"/supplier/{product.supplier_id}")
 
-    return render_template("product_edit.html", product=product, suppliers=suppliers)
+    return redirect(f"/supplier/{product.supplier_id}")
 
 
 @app.route("/product/<int:product_id>/delete", methods=["POST"])
@@ -913,32 +1016,21 @@ def supplier_detail(supplier_id):
 @app.route("/supplier/<int:supplier_id>/edit", methods=["GET", "POST"])
 def edit_supplier(supplier_id):
     supplier = owned_supplier_or_404(supplier_id)
-
-    if request.method == "POST":
-        new_name = request.form.get("name", "").strip()
-        if not new_name:
-            if wants_json():
-                return json_error("نام تأمین‌کننده را وارد کنید.")
-            return render_template("supplier_edit.html", supplier=supplier)
-
-        clash = (
-            Supplier.query.filter_by(owner_id=current_user.id, name=new_name)
-            .filter(Supplier.id != supplier.id)
-            .first()
-        )
-        if clash:
-            if wants_json():
-                return json_error("این نام قبلاً ثبت شده است.")
-            return render_template("supplier_edit.html", supplier=supplier)
-
-        supplier.name = new_name
-        db.session.commit()
-
-        if wants_json():
-            return {"success": True, "id": supplier.id, "name": supplier.name}
+    if request.method != "POST":
         return redirect("/suppliers")
-
-    return render_template("supplier_edit.html", supplier=supplier)
+    new_name = request.form.get("name", "").strip()[:200]
+    if not new_name:
+        return json_error("نام تأمین‌کننده را وارد کنید.")
+    clash = (
+        Supplier.query.filter_by(owner_id=current_user.id, name=new_name)
+        .filter(Supplier.id != supplier.id)
+        .first()
+    )
+    if clash:
+        return json_error("این نام قبلاً ثبت شده است.")
+    supplier.name = new_name
+    db.session.commit()
+    return {"success": True, "id": supplier.id, "name": supplier.name}
 
 
 @app.route("/supplier/<int:supplier_id>/delete", methods=["POST"])
@@ -1040,17 +1132,25 @@ def import_excel():
     import difflib
     import pandas as pd
 
-    filename = uploaded_file.filename.lower()
+    filename = (uploaded_file.filename or "").lower()
+    if not (filename.endswith(".csv") or filename.endswith(".xlsx") or filename.endswith(".xls")):
+        return render_template(
+            "import_excel.html",
+            message="فقط فایل CSV یا Excel مجاز است.",
+            success=False,
+            errors=None,
+            limits=limits,
+        )
 
     try:
         if filename.endswith(".csv"):
             df = pd.read_csv(uploaded_file, encoding="utf-8-sig")
         else:
             df = pd.read_excel(uploaded_file)
-    except Exception as exc:
+    except Exception:
         return render_template(
             "import_excel.html",
-            message=f"خطا در خواندن فایل: {exc}",
+            message="خطا در خواندن فایل. قالب را بررسی کنید.",
             success=False,
             errors=None,
             limits=limits,
@@ -1497,4 +1597,5 @@ def users_gone(user_id):
 if __name__ == "__main__":
     with app.app_context():
         ensure_schema()
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=True)
+    debug = os.environ.get("FLASK_DEBUG", "0") in ("1", "true", "True")
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=debug)

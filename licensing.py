@@ -115,12 +115,12 @@ def verify_key(user_or_ident, key):
         for candidate in [ident, user_code]:
             for tier in ["PRO", "UNLIMITED", "ENTERPRISE"]:
                 expected = generate_key(candidate, tier, period_code)
-                if clean_key == expected:
+                if hmac.compare_digest(clean_key, expected):
                     return True, tier, days, f"لایسنس {label} با موفقیت فعال شد."
 
         for tier in ["UNLIMITED", "PRO"]:
             expected_master = generate_master_key(tier, period_code)
-            if clean_key == expected_master:
+            if hmac.compare_digest(clean_key, expected_master):
                 return True, tier, days, f"کلید لایسنس سراسری ({label}) با موفقیت تأیید شد."
 
     # ۲. پشتیبانی از کلیدهای بدون تگ مدت (فرمت 4 بلوکی استاندارد - مادام‌العمر)
@@ -129,14 +129,14 @@ def verify_key(user_or_ident, key):
             msg = f"LISTIA:{candidate}:{get_user_code(candidate)}:{tier}"
             sig = hmac.new(LICENSE_SECRET.encode("utf-8"), msg.encode("utf-8"), hashlib.sha256).hexdigest().upper()
             legacy_expected = f"LST-{sig[0:4]}-{sig[4:8]}-{sig[8:12]}-{sig[12:16]}"
-            if clean_key == legacy_expected:
+            if hmac.compare_digest(clean_key, legacy_expected):
                 return True, tier, None, "لایسنس مادام‌العمر با موفقیت فعال شد."
 
     for tier in ["UNLIMITED", "PRO"]:
         msg = f"LISTIA:MASTER_KEY_UNIVERSAL:{tier}"
         sig = hmac.new(LICENSE_SECRET.encode("utf-8"), msg.encode("utf-8"), hashlib.sha256).hexdigest().upper()
         legacy_master = f"LST-{sig[0:4]}-{sig[4:8]}-{sig[8:12]}-{sig[12:16]}"
-        if clean_key == legacy_master:
+        if hmac.compare_digest(clean_key, legacy_master):
             return True, tier, None, "کلید لایسنس سراسری مادام‌العمر با موفقیت تأیید شد."
 
     return False, None, None, "کلید لایسنس وارد شده نامعتبر است یا برای این حساب صادر نشده است."
