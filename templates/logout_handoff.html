@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html dir="rtl" lang="fa">
+<head>
+  <meta charset="UTF-8">
+  <title>خروج</title>
+</head>
+<body>
+  <script>
+    try { localStorage.removeItem("listia_auth"); } catch (e) {}
+    location.replace("/login");
+  </script>
+</body>
+</html>

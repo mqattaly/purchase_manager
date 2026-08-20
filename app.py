@@ -5,7 +5,8 @@ from datetime import date, datetime, timedelta
 from dotenv import load_dotenv
 load_dotenv()
 
-from flask import Flask, render_template, request, redirect, url_for, send_file
+from flask import Flask, render_template, request, redirect, url_for, send_file, make_response
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import (
     LoginManager,
@@ -36,6 +37,12 @@ os.makedirs(INSTANCE_DIR, exist_ok=True)
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-me")
+app.config["SESSION_COOKIE_SAMESITE"] = "None"
+app.config["SESSION_COOKIE_SECURE"] = True
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["REMEMBER_COOKIE_SAMESITE"] = "None"
+app.config["REMEMBER_COOKIE_SECURE"] = True
+app.config["REMEMBER_COOKIE_HTTPONLY"] = True
 
 db_url = os.environ.get("DATABASE_URL")
 if db_url:
@@ -53,15 +60,81 @@ if os.environ.get("VERCEL"):
     app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {"poolclass": NullPool}
 
 
+AUTH_COOKIE = "listia_auth"
+AUTH_MAX_AGE = 60 * 60 * 24 * 30
+
+
+def _auth_serializer():
+    return URLSafeTimedSerializer(app.secret_key, salt="listia-auth")
+
+
+def issue_auth_token(user_id):
+    return _auth_serializer().dumps({"uid": int(user_id)})
+
+
+def user_from_auth_token(token):
+    if not token:
+        return None
+    try:
+        data = _auth_serializer().loads(token, max_age=AUTH_MAX_AGE)
+        return db.session.get(User, int(data["uid"]))
+    except (BadSignature, SignatureExpired, KeyError, TypeError, ValueError):
+        return None
+
+
+def attach_auth_cookie(response, user_id):
+    token = issue_auth_token(user_id)
+    kwargs = dict(
+        key=AUTH_COOKIE,
+        value=token,
+        max_age=AUTH_MAX_AGE,
+        httponly=False,
+        secure=True,
+        samesite="None",
+        path="/",
+    )
+    try:
+        response.set_cookie(partitioned=True, **kwargs)
+    except TypeError:
+        response.set_cookie(**kwargs)
+        cookies = response.headers.getlist("Set-Cookie")
+        response.headers.remove("Set-Cookie")
+        for cookie in cookies:
+            if AUTH_COOKIE in cookie and "Partitioned" not in cookie:
+                cookie += "; Partitioned"
+            response.headers.add("Set-Cookie", cookie)
+    return token
+
+
+def login_handoff(user):
+    login_user(user, remember=True)
+    token = issue_auth_token(user.id)
+    resp = make_response(render_template("login_handoff.html", token=token))
+    attach_auth_cookie(resp, user.id)
+    return resp
+
+
 @app.after_request
 def _allow_iframe_preview(response):
     # Arena shows the app inside an iframe; don't block embedding.
     response.headers.pop("X-Frame-Options", None)
     response.headers["Content-Security-Policy"] = "frame-ancestors *"
-    host = (request.host or "").lower()
-    if "e2b.app" in host:
-        app.config["SESSION_COOKIE_SAMESITE"] = "None"
-        app.config["SESSION_COOKIE_SECURE"] = True
+    cookies = response.headers.getlist("Set-Cookie")
+    if cookies:
+        response.headers.remove("Set-Cookie")
+        for cookie in cookies:
+            patched = (
+                cookie.replace("SameSite=Lax", "SameSite=None")
+                .replace("SameSite=Strict", "SameSite=None")
+                .replace("samesite=lax", "SameSite=None")
+            )
+            if "SameSite=" not in patched and "samesite=" not in patched.lower():
+                patched += "; SameSite=None"
+            if "Secure" not in patched:
+                patched += "; Secure"
+            if "Partitioned" not in patched:
+                patched += "; Partitioned"
+            response.headers.add("Set-Cookie", patched)
     return response
 
 db = SQLAlchemy(app)
@@ -497,6 +570,12 @@ def _prepare_request():
         except Exception:
             pass
 
+    if not current_user.is_authenticated:
+        token = request.cookies.get(AUTH_COOKIE) or request.args.get("auth") or request.form.get("auth")
+        user = user_from_auth_token(token)
+        if user:
+            login_user(user, remember=True)
+
     allowed = {"login", "signup", "static", "api_quick_add", "api_suppliers"}
     if request.endpoint in allowed or request.endpoint is None:
         return
@@ -525,6 +604,13 @@ def home():
         user_products(ordered=False).order_by(Product.id.desc()).limit(15).all()
     )
 
+    active_by_supplier = dict(
+        db.session.query(Product.supplier_id, db.func.count(Product.id))
+        .filter(Product.owner_id == current_user.id, Product.ordered.is_(False))
+        .group_by(Product.supplier_id)
+        .all()
+    )
+
     limits = get_user_limits(current_user)
 
     return render_template(
@@ -534,6 +620,7 @@ def home():
         active_count=active_count,
         archived_count=archived_count,
         recent=recent,
+        active_by_supplier=active_by_supplier,
         limits=limits,
     )
 
@@ -553,8 +640,7 @@ def login():
                 user.is_licensed = True
                 user.license_type = "UNLIMITED"
                 db.session.commit()
-            login_user(user)
-            return redirect("/")
+            return login_handoff(user)
         return render_template("login.html", mode="login", error="نام کاربری یا رمز عبور اشتباه است.")
 
     return render_template("login.html", mode="login", error=None)
@@ -597,8 +683,7 @@ def signup():
         db.session.add(user)
         db.session.commit()
         claim_orphaned_data(user.id)
-        login_user(user)
-        return redirect("/")
+        return login_handoff(user)
 
     return render_template("login.html", mode="signup", error=None)
 
@@ -606,7 +691,9 @@ def signup():
 @app.route("/logout")
 def logout():
     logout_user()
-    return redirect(url_for("login"))
+    resp = make_response(render_template("logout_handoff.html"))
+    resp.delete_cookie(AUTH_COOKIE, path="/")
+    return resp
 
 
 @app.route("/search")

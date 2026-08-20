@@ -11,15 +11,15 @@
 
     <div class="stat-row">
       <a href="/purchases" class="stat">
-        <span class="stat-num mono">{{ active_count }}</span>
+        <span class="stat-num mono" id="stat-active">{{ active_count }}</span>
         <span class="stat-label">سفارش فعال</span>
       </a>
       <a href="/suppliers" class="stat">
-        <span class="stat-num mono">{{ suppliers|length }}</span>
+        <span class="stat-num mono" id="stat-suppliers">{{ suppliers|length }}</span>
         <span class="stat-label">تأمین‌کننده</span>
       </a>
       <div class="stat">
-        <span class="stat-num mono">{{ archived_count }}</span>
+        <span class="stat-num mono" id="stat-archived">{{ archived_count }}</span>
         <span class="stat-label">آرشیو شده</span>
       </div>
     </div>
@@ -27,10 +27,36 @@
 
   {% include "partials/quick_add.html" %}
 
+  <div class="section-gap" style="margin-top: 28px;">
+    <div class="section-head">
+      <h3 class="section-title">تأمین‌کننده‌ها</h3>
+      <a href="/suppliers" class="link-more">مدیریت همه</a>
+    </div>
+
+    <div id="dash-supplier-grid" class="supplier-card-grid"{% if not suppliers %} style="display:none;"{% endif %}>
+      {% for s in suppliers %}
+        <a href="/supplier/{{ s.id }}" class="supplier-home-card" data-supplier-id="{{ s.id }}" style="--i: {{ loop.index0 }}">
+          <span class="supplier-card-avatar">{{ s.name[:1] }}</span>
+          <span class="supplier-card-copy">
+            <strong>{{ s.name }}</strong>
+            <small>سفارش فعال</small>
+          </span>
+          <span class="supplier-card-count" data-count>{{ active_by_supplier.get(s.id, 0) if active_by_supplier else 0 }}</span>
+          <svg class="supplier-card-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 18-6-6 6-6"/></svg>
+        </a>
+      {% endfor %}
+    </div>
+
+    <div id="dash-supplier-empty" class="card empty-state"{% if suppliers %} style="display:none;"{% endif %}>
+      <div class="empty-icon">🏭</div>
+      هنوز تأمین‌کننده‌ای ثبت نشده. از فرم بالا تأمین‌کننده جدید بسازید.
+    </div>
+  </div>
+
   <div class="section-gap" style="margin-top: 32px;">
     <div class="section-head">
       <h3 class="section-title">📋 آخرین سفارش‌های فعال</h3>
-      <a href="/purchases" class="link-more">مشاهده همه ({{ active_count }})</a>
+      <a href="/purchases" class="link-more" id="dash-recent-more">مشاهده همه (<span id="dash-recent-total">{{ active_count }}</span>)</a>
     </div>
 
     <div id="dash-recent-card" class="card table-scroll fade-up" style="{{ 'display:none;' if not recent }}">
@@ -125,6 +151,9 @@
       setTimeout(function () {
         row.remove();
         updateDashEmpty();
+        if (window.DashLive) {
+          window.DashLive.onOrdered(id, row.dataset.supplierId);
+        }
         background("/toggle-order/" + id, null, function (msg) {
           showError(msg || "ثبت سفارش انجام نشد");
           window.location.reload();
@@ -136,8 +165,12 @@
       if (!confirm("این محصول حذف شود؟")) return;
       const row = document.querySelector('#dash-recent-body tr[data-id="' + id + '"]');
       if (!row) return;
+      const supplierId = row.dataset.supplierId;
       row.remove();
       updateDashEmpty();
+      if (window.DashLive) {
+        window.DashLive.onProductRemoved(id, supplierId);
+      }
       background("/product/" + id + "/delete", null, function (msg) {
         showError(msg || "حذف انجام نشد");
         window.location.reload();
