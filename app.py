@@ -271,7 +271,7 @@ def recent_product_names(limit=150):
 def read_product_form():
     """Validate the shared product form. Returns (fields, error)."""
     fields = {
-        "supplier_id": request.form.get("supplier", ""),
+        "supplier_id": request.form.get("supplier", "") or request.form.get("supplier_id", ""),
         "product_name": request.form.get("product", "").strip(),
         "quantity": request.form.get("quantity", "").strip(),
         "unit": request.form.get("unit", ""),
@@ -465,7 +465,7 @@ def _prepare_request():
 
 @app.route("/")
 def home():
-    """Opening the app lands straight on the capture screen."""
+    """صفحه اول اپلیکیشن: داشبورد"""
     suppliers = user_suppliers()
 
     active_count = archived_count = 0
@@ -481,16 +481,7 @@ def home():
             active_count += total
 
     recent = (
-        user_products(ordered=False).order_by(Product.id.desc()).limit(5).all()
-    )
-    supplier_active_counts = dict(
-        db.session.query(Product.supplier_id, db.func.count(Product.id))
-        .filter(
-            Product.owner_id == current_user.id,
-            Product.ordered.is_(False),
-        )
-        .group_by(Product.supplier_id)
-        .all()
+        user_products(ordered=False).order_by(Product.id.desc()).limit(15).all()
     )
 
     limits = get_user_limits(current_user)
@@ -498,7 +489,6 @@ def home():
     return render_template(
         "dashboard.html",
         suppliers=suppliers,
-        supplier_active_counts=supplier_active_counts,
         product_names=recent_product_names(),
         active_count=active_count,
         archived_count=archived_count,
@@ -517,7 +507,6 @@ def login():
         password = request.form.get("password", "")
         user = User.query.filter_by(username=username).first()
         if user and check_password_hash(user.password_hash, password):
-            # کاربر smq2458 به عنوان توسعه دهنده خودکار لایسنس و ادمین فعال دارد
             if user.username.lower() in ADMIN_USERNAMES:
                 user.is_admin = True
                 user.is_licensed = True
@@ -684,7 +673,7 @@ def check_duplicate():
 @app.route("/purchases")
 def purchases():
     all_products = user_products(ordered=False).order_by(Product.id.desc()).all()
-    return render_template("purchases.html", products=all_products)
+    return render_template("purchases.html", products=all_products, suppliers=user_suppliers())
 
 
 @app.route("/toggle-order/<int:product_id>", methods=["POST"])
@@ -714,17 +703,27 @@ def unarchive_product(product_id):
 @app.route("/product/<int:product_id>/edit", methods=["GET", "POST"])
 def edit_product(product_id):
     product = owned_product_or_404(product_id)
+    suppliers = user_suppliers()
 
     if request.method == "POST":
         name = request.form.get("product", "").strip()
         quantity = request.form.get("quantity", "").strip()
         unit = request.form.get("unit")
         description = request.form.get("description", "").strip()
+        supplier_id = request.form.get("supplier_id") or request.form.get("supplier")
 
         if not name or not quantity or unit not in UNIT_TYPES:
             if wants_json():
                 return json_error("اطلاعات محصول کامل نیست.")
-            return render_template("product_edit.html", product=product)
+            return render_template("product_edit.html", product=product, suppliers=suppliers)
+
+        if supplier_id:
+            try:
+                target_supplier = Supplier.query.filter_by(id=int(supplier_id), owner_id=current_user.id).first()
+                if target_supplier:
+                    product.supplier_id = target_supplier.id
+            except (ValueError, TypeError):
+                pass
 
         product.product_name = name
         product.quantity = quantity
@@ -736,7 +735,7 @@ def edit_product(product_id):
             return {"success": True, "product": product_payload(product)}
         return redirect(f"/supplier/{product.supplier_id}")
 
-    return render_template("product_edit.html", product=product)
+    return render_template("product_edit.html", product=product, suppliers=suppliers)
 
 
 @app.route("/product/<int:product_id>/delete", methods=["POST"])
@@ -857,6 +856,7 @@ def supplier_detail(supplier_id):
     return render_template(
         "supplier_detail.html",
         supplier=supplier,
+        suppliers=user_suppliers(),
         products=active_products,
         groups=groups,
         today_iso=today.isoformat(),
@@ -1287,7 +1287,6 @@ def admin_license_generator():
     if not is_admin_user(current_user):
         return json_error("دسترسی به این بخش فقط برای مدیر نرم‌افزار مجاز است.", 403)
 
-    # فهرست کاربران ثبت‌شده برای مشاهده وضعیت و صدور سریع لایسنس
     all_users = User.query.order_by(User.id.desc()).all()
     user_list = []
     for u in all_users:

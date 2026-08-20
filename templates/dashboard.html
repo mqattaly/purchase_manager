@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}ثبت سریع · لیستیا{% endblock %}
+{% block title %}داشبورد · لیستیا{% endblock %}
 
 {% block content %}
 
   <div class="page-head">
     <div>
-      <h1 class="page-title">ثبت سریع در لیستیا</h1>
-      <div class="page-sub">هرچه مشتری خواست و نداشتی، همین‌جا بزن — بدون معطلی ذخیره می‌شود</div>
+      <h1 class="page-title">داشبورد</h1>
+      <div class="page-sub">سامانه مدیریت هوشمند خرید و سفارش‌های فروشگاه</div>
     </div>
 
     <div class="stat-row">
@@ -25,76 +25,219 @@
     </div>
   </div>
 
-  {% if not suppliers %}
-    <div class="card card-pad callout">
-      <div class="callout-icon">🏭</div>
-      <div>
-        <div class="callout-title">اول یک تأمین‌کننده بساز</div>
-        <div class="callout-text">در همان کادر «تأمین‌کننده» گزینه‌ی «＋ تأمین‌کننده جدید» را بزن — یک‌بار، بعد همیشه یادش می‌ماند.</div>
-      </div>
-    </div>
-  {% endif %}
-
   {% include "partials/quick_add.html" %}
 
-  {% if suppliers %}
-    <div class="section-gap supplier-home-section">
-      <div class="section-head">
-        <h3 class="section-title">تأمین‌کننده‌ها</h3>
-        <a href="/suppliers" class="link-more">مدیریت</a>
-      </div>
-      <div class="supplier-card-grid">
-        {% for supplier in suppliers %}
-          {% set supplier_active = supplier_active_counts.get(supplier.id, 0) %}
-          <a
-            href="/supplier/{{ supplier.id }}"
-            class="supplier-home-card"
-            style="--i:{{ loop.index0 }}"
-            aria-label="مشاهده سفارش‌های {{ supplier.name }}"
-          >
-            <span class="supplier-card-avatar">{{ supplier.name[:1] }}</span>
-            <span class="supplier-card-copy">
-              <strong>{{ supplier.name }}</strong>
-              <small>{{ supplier_active }} سفارش فعال</small>
-            </span>
-            <span class="supplier-card-count mono">{{ supplier_active }}</span>
-            <svg class="supplier-card-arrow" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
-          </a>
-        {% endfor %}
-      </div>
+  <div class="section-gap" style="margin-top: 32px;">
+    <div class="section-head">
+      <h3 class="section-title">📋 آخرین سفارش‌های فعال</h3>
+      <a href="/purchases" class="link-more">مشاهده همه ({{ active_count }})</a>
     </div>
-  {% endif %}
 
-  {% if recent %}
-    <div class="section-gap">
-      <div class="section-head">
-        <h3 class="section-title">آخرین سفارش‌های فعال</h3>
-        <a href="/purchases" class="link-more">همه</a>
-      </div>
-
-      <div class="card table-scroll fade-up">
-        <table class="data">
-          <thead>
-            <tr>
-              <th>محصول</th>
-              <th>تأمین‌کننده</th>
-              <th>تعداد</th>
-              <th>واحد</th>
+    <div id="dash-recent-card" class="card table-scroll fade-up" style="{{ 'display:none;' if not recent }}">
+      <table class="data">
+        <thead>
+          <tr>
+            <th class="col-order">سفارش</th>
+            <th>تأمین‌کننده</th>
+            <th>نام محصول</th>
+            <th>تعداد</th>
+            <th>نوع تعداد</th>
+            <th>توضیحات</th>
+            <th class="col-actions"></th>
+            <th class="col-actions"></th>
+          </tr>
+        </thead>
+        <tbody id="dash-recent-body">
+          {% for item in recent %}
+            <tr data-id="{{ item.id }}"
+                data-supplier-id="{{ item.supplier_id }}"
+                data-supplier-name="{{ item.supplier.name }}"
+                data-product-name="{{ item.product_name }}"
+                data-quantity="{{ item.quantity }}"
+                data-unit="{{ item.unit }}"
+                data-description="{{ item.description or '' }}">
+              <td class="cell-order">
+                <button type="button" class="order-check" title="ثبت سفارش" aria-label="ثبت سفارش" aria-pressed="false" onclick="toggleDashOrder({{ item.id }})">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                </button>
+              </td>
+              <td class="cell-supplier">
+                <a href="/supplier/{{ item.supplier_id }}" style="font-weight:600; text-decoration:none;">{{ item.supplier.name }}</a>
+              </td>
+              <td class="cell-product"><strong>{{ item.product_name }}</strong></td>
+              <td class="mono cell-quantity">{{ item.quantity }}</td>
+              <td class="cell-unit"><span class="tag">{{ item.unit }}</span></td>
+              <td class="cell-description muted">{{ item.description or '' }}</td>
+              <td>
+                <button type="button" class="icon-btn" title="ویرایش" onclick="startDashEdit({{ item.id }})">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+                </button>
+              </td>
+              <td>
+                <button type="button" class="icon-btn danger" title="حذف" onclick="deleteDashProduct({{ item.id }})">
+                  <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>
+                </button>
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {% for item in recent %}
-              <tr onclick="location.href='/supplier/{{ item.supplier_id }}?highlight={{ item.id }}'" class="row-link">
-                <td>{{ item.product_name }}</td>
-                <td class="muted">{{ item.supplier.name }}</td>
-                <td class="mono">{{ item.quantity }}</td>
-                <td><span class="tag">{{ item.unit }}</span></td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
+          {% endfor %}
+        </tbody>
+      </table>
     </div>
-  {% endif %}
+
+    <div id="dash-recent-empty" class="card empty-state" style="{{ 'display:none;' if recent }}">
+      <div class="empty-icon">📭</div>
+      هیچ سفارش فعالی ثبت نشده است. از فرم بالا اولین کالا را ثبت کنید.
+    </div>
+  </div>
+
+  <script>
+    const DASH_SUPPLIERS = [
+      {% for s in suppliers %}
+        { id: {{ s.id }}, name: {{ s.name|tojson }} }{% if not loop.last %},{% endif %}
+      {% endfor %}
+    ];
+    const DASH_UNITS = ["عدد", "کارتن", "بسته", "گونی", "کیلو"];
+
+    function updateDashEmpty() {
+      const remaining = document.querySelectorAll("#dash-recent-body tr").length;
+      document.getElementById("dash-recent-card").style.display = remaining ? "block" : "none";
+      document.getElementById("dash-recent-empty").style.display = remaining ? "none" : "block";
+    }
+
+    function toggleDashOrder(id) {
+      const row = document.querySelector('#dash-recent-body tr[data-id="' + id + '"]');
+      if (!row || row.dataset.pending === "1") return;
+      row.dataset.pending = "1";
+
+      const box = row.querySelector(".order-check");
+      if (box) {
+        box.classList.add("checked");
+        box.setAttribute("aria-pressed", "true");
+      }
+
+      setTimeout(function () {
+        row.remove();
+        updateDashEmpty();
+        background("/toggle-order/" + id, null, function (msg) {
+          showError(msg || "ثبت سفارش انجام نشد");
+          window.location.reload();
+        });
+      }, 380);
+    }
+
+    function deleteDashProduct(id) {
+      if (!confirm("این محصول حذف شود؟")) return;
+      const row = document.querySelector('#dash-recent-body tr[data-id="' + id + '"]');
+      if (!row) return;
+      row.remove();
+      updateDashEmpty();
+      background("/product/" + id + "/delete", null, function (msg) {
+        showError(msg || "حذف انجام نشد");
+        window.location.reload();
+      });
+    }
+
+    function startDashEdit(id) {
+      const row = document.querySelector('#dash-recent-body tr[data-id="' + id + '"]');
+      if (!row || row.classList.contains("editing")) return;
+      row.classList.add("editing");
+
+      const product = row.dataset.productName || "";
+      const quantity = row.dataset.quantity || "";
+      const unit = row.dataset.unit || "";
+      const description = row.dataset.description || "";
+      const currentSupplierId = String(row.dataset.supplierId || "");
+
+      row.querySelector(".cell-supplier").innerHTML =
+        '<select class="field" style="height:34px; width:130px;">' +
+        DASH_SUPPLIERS.map(function (s) {
+          return '<option value="' + s.id + '"' + (String(s.id) === currentSupplierId ? ' selected' : '') + '>' + escapeHtml(s.name) + '</option>';
+        }).join("") +
+        '</select>';
+
+      row.querySelector(".cell-product").innerHTML = '<input class="field" style="height:34px; width:140px;" value="' + escapeAttr(product) + '">';
+      row.querySelector(".cell-quantity").innerHTML = '<input class="field mono" style="height:34px; width:70px;" type="number" value="' + escapeAttr(quantity) + '">';
+      row.querySelector(".cell-unit").innerHTML =
+        '<select class="field" style="height:34px; width:90px;">' +
+        DASH_UNITS.map(function (u) {
+          return '<option value="' + u + '"' + (u === unit ? " selected" : "") + ">" + u + "</option>";
+        }).join("") +
+        "</select>";
+      row.querySelector(".cell-description").innerHTML = '<input class="field" style="height:34px; width:140px;" value="' + escapeAttr(description) + '">';
+
+      const cells = row.querySelectorAll("td");
+      cells[6].innerHTML = '<button type="button" class="icon-btn" onclick="saveDashEdit(' + id + ')" title="ذخیره">' +
+        '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></button>';
+      cells[7].innerHTML = '<button type="button" class="icon-btn" onclick="cancelDashEdit(' + id + ')" title="لغو">✕</button>';
+    }
+
+    function cancelDashEdit(id) {
+      const row = document.querySelector('#dash-recent-body tr[data-id="' + id + '"]');
+      if (!row) return;
+      row.classList.remove("editing");
+      paintDashRow(row, {
+        supplier_id: row.dataset.supplierId,
+        supplier_name: row.dataset.supplierName,
+        product_name: row.dataset.productName,
+        quantity: row.dataset.quantity,
+        unit: row.dataset.unit,
+        description: row.dataset.description
+      });
+    }
+
+    function saveDashEdit(id) {
+      const row = document.querySelector('#dash-recent-body tr[data-id="' + id + '"]');
+      const supplierSelect = row.querySelector(".cell-supplier select");
+      const supplierId = supplierSelect.value;
+      const supplierName = supplierSelect.options[supplierSelect.selectedIndex].textContent;
+      const product = row.querySelector(".cell-product input").value.trim();
+      const quantity = row.querySelector(".cell-quantity input").value.trim();
+      const unit = row.querySelector(".cell-unit select").value;
+      const description = row.querySelector(".cell-description input").value.trim();
+
+      if (!product || !quantity || !unit) {
+        showError("اطلاعات محصول کامل نیست.");
+        return;
+      }
+
+      row.dataset.supplierId = supplierId;
+      row.dataset.supplierName = supplierName;
+      row.dataset.productName = product;
+      row.dataset.quantity = quantity;
+      row.dataset.unit = unit;
+      row.dataset.description = description;
+      row.classList.remove("editing");
+
+      paintDashRow(row, {
+        supplier_id: supplierId,
+        supplier_name: supplierName,
+        product_name: product,
+        quantity: quantity,
+        unit: unit,
+        description: description
+      });
+
+      background("/product/" + id + "/edit", {
+        headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "fetch" },
+        body: new URLSearchParams({ product: product, quantity: quantity, unit: unit, description: description, supplier_id: supplierId })
+      }, function (msg) {
+        showError(msg || "ذخیره نشد");
+      });
+    }
+
+    function paintDashRow(row, item) {
+      row.innerHTML =
+        '<td class="cell-order"><button type="button" class="order-check" title="ثبت سفارش" aria-label="ثبت سفارش" aria-pressed="false" onclick="toggleDashOrder(' + row.dataset.id + ')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></button></td>' +
+        '<td class="cell-supplier"><a href="/supplier/' + item.supplier_id + '" style="font-weight:600; text-decoration:none;">' + escapeHtml(item.supplier_name) + '</a></td>' +
+        '<td class="cell-product"><strong>' + escapeHtml(item.product_name) + "</strong></td>" +
+        '<td class="mono cell-quantity">' + escapeHtml(item.quantity) + "</td>" +
+        '<td class="cell-unit"><span class="tag">' + escapeHtml(item.unit) + "</span></td>" +
+        '<td class="cell-description muted">' + escapeHtml(item.description || "") + "</td>" +
+        '<td><button type="button" class="icon-btn" title="ویرایش" onclick="startDashEdit(' + row.dataset.id + ')">' +
+          '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button></td>' +
+        '<td><button type="button" class="icon-btn danger" title="حذف" onclick="deleteDashProduct(' + row.dataset.id + ')">' +
+          '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button></td>';
+    }
+  </script>
 
 {% endblock %}
