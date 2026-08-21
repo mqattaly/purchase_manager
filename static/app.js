@@ -91,6 +91,10 @@
         .json()
         .catch(function () { return {}; })
         .then(function (data) {
+          if (res.status === 401 && location.pathname !== "/login" && location.pathname !== "/signup") {
+            toast((data && data.message) || "نشست شما منقضی شده است؛ دوباره وارد شوید.", "warning", 4200);
+            setTimeout(function () { window.location.href = "/login"; }, 1100);
+          }
           return { ok: res.ok && data.success !== false, status: res.status, data: data };
         });
     });
@@ -728,6 +732,10 @@
             window.DashLive.addSupplier(result.data.id, result.data.name, 0);
             window.DashLive.scheduleRefresh();
           }
+
+          if (typeof window.QuotaLive !== "undefined") {
+            window.QuotaLive.bumpSupplier(1);
+          }
         })
         .catch(() => {
           option.remove();
@@ -936,13 +944,14 @@
 
       if (!entry) {
         entry = {};
-
-        entry.promise = new Promise(function (resolve) {
-          entry.resolve = resolve;
-        });
-
         this.saves.set(key, entry);
       }
+
+      // هر تلاش برای ذخیره یک Promise تازه می‌خواهد؛ قبلی ممکن است با
+      // مقدار null (ناموفق) resolve شده باشد و دیگر به درد نخورد.
+      entry.promise = new Promise(function (resolve) {
+        entry.resolve = resolve;
+      });
 
       entry.payload = payload;
 
@@ -1033,6 +1042,12 @@
           row,
           "failed"
         );
+      }
+
+      // منتظران whenSaved (مثل دکمه حذف) نباید برای همیشه معلق بمانند
+      const entry = this.saves.get(key);
+      if (entry && entry.resolve) {
+        entry.resolve(null);
       }
 
       toast(
@@ -1469,6 +1484,7 @@
 
       this.whenSaved(key)
         .then(function (id) {
+          if (!id) throw new Error("unsaved");
           return request(
             "/product/" +
             id +
@@ -1543,8 +1559,15 @@
         return;
       }
 
+      // مهم: شناسه واقعی محصول باید در همین scope نگه داشته شود؛
+      // پارامتر `id` داخل .then قبلی در .then بعدی قابل دسترس نیست و
+      // همین موضوع باعث می‌شد حذفِ موفق هم با خطای «حذف انجام نشد» روبرو شود.
+      let realId = null;
+
       this.whenSaved(key)
         .then(function (id) {
+          if (!id) throw new Error("unsaved");
+          realId = id;
           return request(
             "/product/" +
             id +
@@ -1558,7 +1581,7 @@
           if (result.ok) {
             this.saves.delete(key);
             if (typeof window.DashLive !== "undefined") {
-              window.DashLive.onProductRemoved(id, supplierId);
+              window.DashLive.onProductRemoved(realId, supplierId);
             }
             return;
           }
@@ -1570,7 +1593,7 @@
           );
 
           toast(
-            "حذف انجام نشد",
+            (result.data && result.data.message) || "حذف انجام نشد",
             "error"
           );
         })
@@ -1713,6 +1736,65 @@
         }
       } else {
         this.supplier.focus();
+      }
+    },
+
+    /* ------------------------------------------- live license lock gate */
+
+    /**
+     * بدون رفرش صفحه، فرم ثبت سریع را قفل/باز می‌کند (وقتی سقف ۵ محصولِ
+     * نسخه آزمایشی در همان نشست پر یا خالی می‌شود).
+     */
+    setLocked(locked) {
+      if (!this.root) return;
+      if (this.root.dataset.isLicensed === "true") locked = false;
+
+      this.root.dataset.canAddProduct = locked ? "false" : "true";
+
+      const banner = document.getElementById("qa-lock-banner");
+      if (banner) banner.hidden = !locked;
+
+      [this.product, this.quantity, this.description].forEach(function (el) {
+        if (el) el.disabled = locked;
+      });
+
+      if (this.unitChips) {
+        this.unitChips.querySelectorAll(".unit-chip").forEach(function (chip) {
+          chip.disabled = locked;
+        });
+      }
+
+      const btn = this.root.querySelector("#qa-submit-btn");
+      if (btn) {
+        btn.disabled = locked;
+        btn.title = locked ? "برای ثبت محصولات بیشتر لایسنس تهیه کنید" : "ثبت خرید";
+        btn.innerHTML = locked
+          ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> قفل (نیاز به لایسنس)'
+          : '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg> ثبت';
+      }
+    },
+
+    /**
+     * گزینه «تأمین‌کننده جدید» را مطابق سهمیه لایو به حالت قفل/باز تغییر می‌دهد.
+     */
+    syncSupplierGate(canAdd) {
+      if (!this.supplier || !this.root) return;
+      if (this.root.dataset.isLicensed === "true") return;
+
+      this.root.dataset.canAddSupplier = canAdd ? "true" : "false";
+
+      const lockedOpt = this.supplier.querySelector('option[value="__locked_supplier__"]');
+      const newOpt = this.supplier.querySelector('option[value="__new__"]');
+
+      if (canAdd && lockedOpt) {
+        lockedOpt.value = "__new__";
+        lockedOpt.textContent = "＋ تأمین‌کننده جدید…";
+      } else if (!canAdd && newOpt) {
+        if (this.supplier.value === "__new__") {
+          this.closeNewSupplier();
+        }
+        newOpt.value = "__locked_supplier__";
+        newOpt.textContent = "🔒 ＋ تأمین‌کننده جدید (نیاز به لایسنس)";
       }
     }
   };
@@ -1946,6 +2028,7 @@
       if (total) this.bump(total, 1);
       this.bumpSupplier(product.supplier_id, 1);
       this.prependRecent(product);
+      if (typeof QuotaLive !== "undefined") QuotaLive.bumpProduct(1);
       this.scheduleRefresh();
     },
 
@@ -1959,6 +2042,7 @@
         row.remove();
         if (typeof updateDashEmpty === "function") updateDashEmpty();
       }
+      if (typeof QuotaLive !== "undefined") QuotaLive.bumpProduct(-1);
       this.scheduleRefresh();
     },
 
@@ -2013,6 +2097,174 @@
 
   window.DashLive = DashLive;
 
+  /* ===================================================================== */
+  /* QuotaLive — شمارنده‌های زنده سهمیه نسخه آزمایشی در سایدبار            */
+  /* بدون رفرش صفحه: بعد از ثبت/حذف کالا یا تأمین‌کننده به‌روز می‌شود.     */
+  /* ===================================================================== */
+
+  const QuotaLive = {
+    state: null,
+    _timer: null,
+
+    init() {
+      // ویجت سهمیه فقط برای کاربران نسخه آزمایشی در سایدبار رندر می‌شود
+      if (!document.getElementById("sidebar-quota-products")) return;
+
+      const self = this;
+
+      // نخست از رندر سرور بخوان، بعد با سرور دقیق شو
+      this.state = this._stateFromDom();
+      if (this.state) this.refresh();
+
+      window.addEventListener("pageshow", function (event) {
+        if (event.persisted) self.refresh();
+      });
+    },
+
+    _pair(id) {
+      // "3/5" → [3, 5]
+      const el = document.getElementById(id);
+      if (!el) return null;
+      const nums = (el.textContent || "").split("/").map(function (part) {
+        const n = parseInt(String(part).replace(/[^\d]/g, ""), 10);
+        return isNaN(n) ? 0 : n;
+      });
+      return [nums[0] || 0, nums.length > 1 ? nums[1] : null];
+    },
+
+    _stateFromDom() {
+      const s = this._pair("sidebar-quota-suppliers");
+      const p = this._pair("sidebar-quota-products");
+      if (!s || !p) return null;
+      const maxS = s[1] || 1;
+      const maxP = p[1] || 5;
+      return {
+        is_licensed: false,
+        supplier_count: s[0],
+        product_count: p[0],
+        max_suppliers: maxS,
+        max_products: maxP,
+        can_add_supplier: s[0] < maxS,
+        can_add_product: p[0] < maxP
+      };
+    },
+
+    refresh() {
+      const self = this;
+      return request("/api/license-status")
+        .then(function (result) {
+          if (result.ok && result.data && result.data.limits) {
+            self.apply(result.data.limits);
+          }
+          return result;
+        })
+        .catch(function () { return null; });
+    },
+
+    schedule(delay) {
+      if (this._timer) clearTimeout(this._timer);
+      const self = this;
+      this._timer = setTimeout(function () {
+        self._timer = null;
+        self.refresh();
+      }, typeof delay === "number" ? delay : 500);
+    },
+
+    bumpProduct(delta) { this._bump("product", delta); },
+    bumpSupplier(delta) { this._bump("supplier", delta); },
+
+    _bump(kind, delta) {
+      // اگر ویجت سهمیه روی صفحه نیست (کاربر لایسنس‌دار) فقط کاری نکن
+      if (!document.getElementById("sidebar-quota-products")) return;
+
+      if (!this.state) this.state = this._stateFromDom();
+      if (!this.state) { this.schedule(250); return; }
+
+      const st = this.state;
+      if (kind === "product") {
+        st.product_count = Math.max(0, (st.product_count || 0) + delta);
+      } else {
+        st.supplier_count = Math.max(0, (st.supplier_count || 0) + delta);
+      }
+      st.can_add_product = st.product_count < (st.max_products || 5);
+      st.can_add_supplier = st.supplier_count < (st.max_suppliers || 1);
+
+      this.apply(st);
+      // همگام‌سازی دقیق با دیتابیس (منبع اصلی حقیقت)
+      this.schedule(400);
+    },
+
+    apply(limits) {
+      if (!limits) return;
+
+      // کاربر لایسنس‌دار ویجت سهمیه ندارد؛ بعد از فعال‌سازی صفحه رفرش می‌شود
+      if (limits.is_licensed) {
+        this.state = null;
+        if (window.App && App.QuickAdd) App.QuickAdd.setLocked(false);
+        return;
+      }
+
+      const maxP = limits.max_products || 5;
+      const maxS = limits.max_suppliers || 1;
+      const pc = Number(limits.product_count) || 0;
+      const sc = Number(limits.supplier_count) || 0;
+      const canAddProduct = limits.can_add_product !== false && pc < maxP;
+      const canAddSupplier = limits.can_add_supplier !== false && sc < maxS;
+
+      this.state = {
+        is_licensed: false,
+        product_count: pc,
+        supplier_count: sc,
+        max_products: maxP,
+        max_suppliers: maxS,
+        can_add_product: canAddProduct,
+        can_add_supplier: canAddSupplier
+      };
+
+      // سایدبار — کنار هم: تأمین‌کننده و کالا
+      const supEl = document.getElementById("sidebar-quota-suppliers");
+      if (supEl) supEl.textContent = sc + "/" + maxS;
+
+      const prodEl = document.getElementById("sidebar-quota-products");
+      if (prodEl) prodEl.textContent = pc + "/" + maxP;
+
+      const bar = document.getElementById("sidebar-quota-bar");
+      if (bar) {
+        bar.style.width = Math.min(100, Math.round((pc / maxP) * 100)) + "%";
+      }
+
+      // مودال لایسنس — اعداد سهمیه همیشه تازه بمانند
+      const modalSup = document.getElementById("modal-quota-suppliers");
+      if (modalSup) modalSup.textContent = sc + " / " + maxS;
+      const modalProd = document.getElementById("modal-quota-products");
+      if (modalProd) modalProd.textContent = pc + " / " + maxP;
+
+      // فرم ثبت سریع در داشبورد — قفل/بازشدن زنده بدون رفرش
+      if (window.App && App.QuickAdd && App.QuickAdd.root) {
+        App.QuickAdd.setLocked(!canAddProduct);
+        App.QuickAdd.syncSupplierGate(canAddSupplier);
+      }
+
+      // صفحه تأمین‌کننده‌ها — فرم افزودن و بنر قفل به‌صورت زنده
+      const supplierInput = document.getElementById("supplier-name");
+      if (supplierInput) {
+        supplierInput.disabled = !canAddSupplier;
+        const addBtn = document.getElementById("add-supplier-btn");
+        if (addBtn) {
+          addBtn.disabled = !canAddSupplier;
+          addBtn.title = canAddSupplier ? "افزودن تأمین‌کننده" : "برای ثبت تأمین‌کننده بیشتر لایسنس تهیه کنید";
+          addBtn.innerHTML = canAddSupplier
+            ? '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/></svg> افزودن'
+            : '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> قفل لایسنس';
+        }
+        const supBanner = document.getElementById("suppliers-lock-banner");
+        if (supBanner) supBanner.hidden = canAddSupplier;
+      }
+    }
+  };
+
+  window.QuotaLive = QuotaLive;
+
   window.App = App;
   window.escapeHtml = escapeHtml;
   window.escapeAttr = escapeAttr;
@@ -2043,6 +2295,9 @@
       document.getElementById("quick-add")
     );
 
+    // شمارنده‌های سهمیه سایدبار — زنده و بدون نیاز به رفرش صفحه
+    QuotaLive.init();
+
     // Sync the dashboard counters with the database as soon as the page opens,
     // so suppliers with orders registered earlier don't start from zero.
     DashLive.refresh();
@@ -2054,6 +2309,9 @@
   });
 
   document.addEventListener("visibilitychange", function () {
-    if (document.visibilityState === "visible") DashLive.scheduleRefresh(200);
+    if (document.visibilityState === "visible") {
+      DashLive.scheduleRefresh(200);
+      QuotaLive.schedule(300);
+    }
   });
 })(window, document);

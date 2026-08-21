@@ -196,6 +196,8 @@
       const snap = snapshotRow(row);
       row.remove();
       updateEmpty();
+      // شمارنده سهمیه سایدبار — لایو کم می‌شود و با سرور دقیق می‌شود
+      if (window.QuotaLive) window.QuotaLive.bumpProduct(-1);
       background("/product/" + id + "/delete", null, function (msg) {
         restoreRow(snap);
         showError(msg || "حذف انجام نشد");

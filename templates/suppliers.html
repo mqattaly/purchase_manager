@@ -10,8 +10,8 @@
     </div>
   </div>
 
-  {% if limits and not limits.can_add_supplier %}
-    <div class="card card-pad license-lock-banner" style="margin-bottom:22px;">
+  {% if limits and not limits.is_licensed %}
+    <div class="card card-pad license-lock-banner" id="suppliers-lock-banner" style="margin-bottom:22px;"{% if limits.can_add_supplier %} hidden{% endif %}>
       <div class="license-lock-icon">🔒</div>
       <div class="license-lock-content">
         <div class="license-lock-title">سقف تأمین‌کننده در نسخه آزمایشی تکمیل است (۱ از ۱)</div>
@@ -105,6 +105,8 @@
           addSupplierRow(result.data.id, result.data.name);
           input.value = "";
           input.focus();
+          // شمارنده سایدبار و وضعیت قفل فرم — زنده و بدون رفرش
+          if (window.QuotaLive) window.QuotaLive.bumpSupplier(1);
         })
         .catch(function () {
           btn.disabled = false;
@@ -157,7 +159,11 @@
 
       App.request("/supplier/" + id + "/delete", { method: "POST" })
         .then(function (result) {
-          if (result.ok) return;
+          if (result.ok) {
+            // حذف تأمین‌کننده، محصولاتش را هم می‌برد؛ همگام‌سازی سروری انجام می‌شود
+            if (window.QuotaLive) window.QuotaLive.bumpSupplier(-1);
+            return;
+          }
           restoreSupplier(backup);
           showError((result.data && result.data.message) || "حذف انجام نشد");
         })

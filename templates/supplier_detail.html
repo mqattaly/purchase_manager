@@ -363,6 +363,7 @@
       row.remove();
       if (wasActive) syncActiveEmpty();
       if (group) updateGroupCount(group);
+      if (window.QuotaLive) window.QuotaLive.bumpProduct(-1);
 
       background("/product/" + id + "/delete", null, function (msg) {
         const restored = makeRow(item, wasActive ? "active" : "archive");
@@ -383,6 +384,8 @@
       const parent = group.parentNode;
       group.remove();
       checkArchiveEmpty();
+      // تعداد دقیق محصولات حذف‌شده را سرور می‌داند؛ سهمیه را همان‌جا دقیق کن
+      if (window.QuotaLive) window.QuotaLive.schedule(500);
 
       background("/supplier/" + SUPPLIER_ID + "/archive/" + dateKey + "/delete", null, function (msg) {
         const empty = document.getElementById("archive-empty");
