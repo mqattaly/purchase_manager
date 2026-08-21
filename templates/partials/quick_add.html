@@ -7,17 +7,14 @@
   data-can-add-product='{{ "true" if (limits and limits.can_add_product) else "false" }}'
   data-can-add-supplier='{{ "true" if (limits and limits.can_add_supplier) else "false" }}'
   data-is-licensed='{{ "true" if (limits and limits.is_licensed) else "false" }}'
+  data-product-count='{{ limits.product_count if limits else 0 }}'
+  data-supplier-count='{{ limits.supplier_count if limits else 0 }}'
 >
 
   <div class="quick-head">
     <div class="quick-title">
       <span class="quick-dot"></span>
       ثبت سریع در لیستیا
-      {% if limits and not limits.is_licensed %}
-        <span class="quota-pill {{ 'quota-pill-full' if not limits.can_add_product else '' }}">
-          {{ limits.product_count }}/5 کالا
-        </span>
-      {% endif %}
     </div>
 
     <div class="quick-hint">
@@ -32,8 +29,8 @@
     </div>
   </div>
 
-  {% if limits and not limits.can_add_product %}
-    <div class="license-lock-banner">
+  {% if limits and not limits.is_licensed %}
+    <div id="qa-product-lock" class="license-lock-banner" {{ 'hidden' if limits.can_add_product else '' }}>
       <div class="license-lock-icon">🔒</div>
       <div class="license-lock-content">
         <div class="license-lock-title">سقف ۵ محصول در نسخه آزمایشی تکمیل است</div>

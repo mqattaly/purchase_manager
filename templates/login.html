@@ -26,7 +26,7 @@
       padding: 20px;
     }
     .login-card {
-      width: 100%; max-width: 360px;
+      width: 100%; max-width: {{ '430px' if mode == 'signup' else '360px' }};
       background: var(--surface);
       border-radius: var(--radius-lg);
       box-shadow: var(--shadow-pop);
@@ -53,6 +53,11 @@
       transition: border-color var(--fast), box-shadow var(--fast);
     }
     .login-field:focus { border-color: var(--teal); box-shadow: var(--shadow-focus); }
+    .login-name-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .login-phone { direction: ltr; text-align: left; }
+    @media (max-width: 430px) {
+      .login-name-row { grid-template-columns: 1fr; gap: 0; }
+    }
     .login-btn {
       width: 100%; height: 46px; border: none;
       border-radius: var(--radius-sm);
@@ -116,8 +121,13 @@
       {% if mode == 'signup' %}
         <div class="login-hint">حساب جدید آزمایشی: شامل ۱ تأمین‌کننده و ۵ محصول برای شروع سریع.</div>
         <form method="POST" action="/signup">
-          <input class="login-field" name="username" placeholder="نام کاربری" autocomplete="username" required autofocus>
-          <input class="login-field" name="password" type="password" placeholder="رمز عبور" autocomplete="new-password" required>
+          <div class="login-name-row">
+            <input class="login-field" name="first_name" maxlength="100" placeholder="نام" autocomplete="given-name" value="{{ request.form.get('first_name', '') }}" required autofocus>
+            <input class="login-field" name="last_name" maxlength="100" placeholder="نام خانوادگی" autocomplete="family-name" value="{{ request.form.get('last_name', '') }}" required>
+          </div>
+          <input class="login-field login-phone" name="mobile" maxlength="20" inputmode="tel" placeholder="شماره موبایل (مثلاً 09121234567)" autocomplete="tel" value="{{ request.form.get('mobile', '') }}" required>
+          <input class="login-field" name="username" maxlength="100" placeholder="نام کاربری" autocomplete="username" value="{{ request.form.get('username', '') }}" required>
+          <input class="login-field" name="password" type="password" minlength="4" placeholder="رمز عبور" autocomplete="new-password" required>
           <button type="submit" class="login-btn signup">ساخت حساب کاربری</button>
         </form>
         <div class="login-switch">

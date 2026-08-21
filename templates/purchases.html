@@ -199,6 +199,8 @@
       background("/product/" + id + "/delete", null, function (msg) {
         restoreRow(snap);
         showError(msg || "حذف انجام نشد");
+      }, function () {
+        if (window.DashLive) window.DashLive.refresh();
       });
     }
 

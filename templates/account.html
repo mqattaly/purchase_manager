@@ -28,6 +28,16 @@
             <span class="tag tag-accent" style="margin-right:6px; font-size:11px;">👑 حساب مدیر و توسعه‌دهنده</span>
           {% endif %}
         </div>
+        {% if current_user.first_name or current_user.last_name or current_user.mobile %}
+          <div class="page-sub" style="margin-top:3px;">
+            {% if current_user.first_name or current_user.last_name %}
+              {{ current_user.first_name or '' }} {{ current_user.last_name or '' }}
+            {% endif %}
+            {% if current_user.mobile %}
+              <span class="mono" dir="ltr" style="display:inline-block; margin-right:6px;">{{ current_user.mobile }}</span>
+            {% endif %}
+          </div>
+        {% endif %}
         <div class="page-sub" style="margin-top:2px;">
           {% if is_admin %}
             <span class="tag tag-accent">👑 حساب مالک سیستم (س.م.قتالی - نامحدود دائمی)</span>

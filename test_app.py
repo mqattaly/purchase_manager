@@ -1,6 +1,12 @@
 import io
+import os
 import unittest
 from datetime import datetime, timedelta
+
+# Tests must never connect to the deployed PostgreSQL database or mutate the
+# tracked local sample database.
+os.environ["DATABASE_URL"] = "sqlite:///:memory:"
+
 import pandas as pd
 from werkzeug.security import check_password_hash
 from app import app, db, User, Supplier, Product, get_user_limits, issue_api_token, is_admin_user
@@ -20,10 +26,64 @@ class ListiaTestCase(unittest.TestCase):
             db.session.remove()
             db.drop_all()
 
-    def register_and_login(self, username="testuser", password="password123"):
-        res = self.client.post("/signup", data={"username": username, "password": password}, follow_redirects=True)
+    def register_and_login(
+        self,
+        username="testuser",
+        password="password123",
+        first_name="کاربر",
+        last_name="آزمایشی",
+        mobile=None,
+    ):
+        if mobile is None:
+            suffix = sum((index + 1) * ord(char) for index, char in enumerate(username)) % 1_000_000_000
+            mobile = "09" + f"{suffix:09d}"
+        res = self.client.post(
+            "/signup",
+            data={
+                "first_name": first_name,
+                "last_name": last_name,
+                "mobile": mobile,
+                "username": username,
+                "password": password,
+            },
+            follow_redirects=True,
+        )
         self.assertEqual(res.status_code, 200)
         return res
+
+    def test_signup_saves_profile_and_validates_mobile(self):
+        page = self.client.get("/signup")
+        html = page.get_data(as_text=True)
+        self.assertIn('name="first_name"', html)
+        self.assertIn('name="last_name"', html)
+        self.assertIn('name="mobile"', html)
+
+        invalid = self.client.post(
+            "/signup",
+            data={
+                "first_name": "علی",
+                "last_name": "رضایی",
+                "mobile": "12345",
+                "username": "ali",
+                "password": "123456",
+            },
+        )
+        self.assertIn("شماره موبایل معتبر نیست", invalid.get_data(as_text=True))
+        with app.app_context():
+            self.assertIsNone(User.query.filter_by(username="ali").first())
+
+        self.register_and_login(
+            "ali",
+            "123456",
+            first_name=" علی ",
+            last_name=" رضايي ",
+            mobile="+۹۸ ۹۱۲ ۱۲۳ ۴۵۶۷",
+        )
+        with app.app_context():
+            user = User.query.filter_by(username="ali").first()
+            self.assertEqual(user.first_name, "علی")
+            self.assertEqual(user.last_name, "رضایی")
+            self.assertEqual(user.mobile, "09121234567")
 
     def test_time_limited_and_lifetime_licenses(self):
         self.register_and_login("morteza", "123456")
@@ -119,6 +179,88 @@ class ListiaTestCase(unittest.TestCase):
             prod = db.session.get(Product, p_id)
             self.assertEqual(prod.supplier_id, s2_id)
             self.assertEqual(prod.product_name, "کالای تستی منتقل شده")
+
+    def test_trial_sidebar_quota_and_new_product_delete(self):
+        """Trial counts come from the live API and a just-saved row is deletable."""
+        self.register_and_login("trial-user", "123456")
+        supplier_res = self.client.post(
+            "/suppliers",
+            data={"name": "تأمین آزمایشی"},
+            headers={"X-Requested-With": "fetch"},
+        )
+        supplier_id = supplier_res.get_json()["id"]
+        product_res = self.client.post(
+            "/new-purchase",
+            data={
+                "supplier": str(supplier_id),
+                "product": "محصول تازه",
+                "quantity": "1",
+                "unit": "عدد",
+                "description": "",
+            },
+            headers={"X-Requested-With": "fetch"},
+        )
+        product_id = product_res.get_json()["product"]["id"]
+
+        html = self.client.get("/").get_data(as_text=True)
+        self.assertIn('id="sidebar-supplier-count">1</b>/1', html)
+        self.assertIn('id="sidebar-product-count">1</b>/5', html)
+        self.assertNotIn('class="quota-pill', html)
+
+        stats = self.client.get("/api/dashboard/stats").get_json()
+        self.assertEqual(stats["supplier_count"], 1)
+        self.assertEqual(stats["product_count"], 1)
+        self.assertTrue(stats["can_add_product"])
+        self.assertFalse(stats["can_add_supplier"])
+        blocked_supplier = self.client.post(
+            "/suppliers",
+            data={"name": "تأمین دوم"},
+            headers={"X-Requested-With": "fetch"},
+        )
+        self.assertEqual(blocked_supplier.status_code, 403)
+        self.assertTrue(blocked_supplier.get_json()["license_locked"])
+
+        for number in range(2, 6):
+            added = self.client.post(
+                "/new-purchase",
+                data={
+                    "supplier": str(supplier_id),
+                    "product": f"محصول {number}",
+                    "quantity": "1",
+                    "unit": "عدد",
+                },
+                headers={"X-Requested-With": "fetch"},
+            )
+            self.assertEqual(added.status_code, 200)
+
+        blocked = self.client.post(
+            "/new-purchase",
+            data={
+                "supplier": str(supplier_id),
+                "product": "محصول ششم",
+                "quantity": "1",
+                "unit": "عدد",
+            },
+            headers={"X-Requested-With": "fetch"},
+        )
+        self.assertEqual(blocked.status_code, 403)
+        self.assertTrue(blocked.get_json()["license_locked"])
+        stats = self.client.get("/api/dashboard/stats").get_json()
+        self.assertEqual(stats["product_count"], 5)
+        self.assertFalse(stats["can_add_product"])
+
+        deleted = self.client.post(
+            f"/product/{product_id}/delete",
+            headers={"X-Requested-With": "fetch"},
+        )
+        self.assertEqual(deleted.status_code, 200)
+        self.assertTrue(deleted.get_json()["success"])
+        with app.app_context():
+            self.assertIsNone(db.session.get(Product, product_id))
+
+        stats = self.client.get("/api/dashboard/stats").get_json()
+        self.assertEqual(stats["product_count"], 4)
+        self.assertTrue(stats["can_add_product"])
 
     def test_supplier_card_counters_include_previous_products(self):
         """کارت تأمین‌کننده باید محصولات قبلی را هم بشمارد، نه فقط ثبت‌های جدید."""
@@ -240,15 +382,24 @@ class ListiaTestCase(unittest.TestCase):
         self.client.get("/logout")
         self.register_and_login("smq2458", "adminpassword")
 
-        # ۱) ویرایش کاربر: نام کاربری و رمز عبور
+        # ۱) ویرایش کاربر: مشخصات، نام کاربری و رمز عبور
         res = self.client.post(f"/api/admin/users/{target_id}/update",
-                               data={"username": "mohammad-new", "new_password": "9876"},
+                               data={
+                                   "first_name": "محمد",
+                                   "last_name": "محمدی",
+                                   "mobile": "۰۹۱۲ ۱۱۱ ۲۲۳۳",
+                                   "username": "mohammad-new",
+                                   "new_password": "9876",
+                               },
                                headers={"X-Requested-With": "fetch"})
         self.assertEqual(res.status_code, 200)
         self.assertTrue(res.get_json()["success"])
         with app.app_context():
             target = db.session.get(User, target_id)
             self.assertEqual(target.username, "mohammad-new")
+            self.assertEqual(target.first_name, "محمد")
+            self.assertEqual(target.last_name, "محمدی")
+            self.assertEqual(target.mobile, "09121112233")
             self.assertTrue(check_password_hash(target.password_hash, "9876"))
 
         # ۲) ویرایش لایسنس: ۶۰ روزه
@@ -314,6 +465,11 @@ class ListiaTestCase(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         html = res.get_data(as_text=True)
         self.assertIn("پنل صدور لایسنس", html)
+        self.assertIn("نام و نام خانوادگی", html)
+        self.assertIn("شماره موبایل", html)
+        self.assertIn('id="edit-first-name"', html)
+        self.assertIn('id="edit-last-name"', html)
+        self.assertIn('id="edit-mobile"', html)
 
         # Generate 90-day license for customer 'reza'
         res = self.client.post("/api/admin/generate-license", data={

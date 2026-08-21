@@ -122,7 +122,14 @@
                 <span class="lic-badge" style="color:#FFB3AB;">⚠️ لایسنس منقضی شده</span>
                 <span class="lic-action-text" style="color:#FFB3AB;">تمدید ↗</span>
               </div>
-              <div style="font-size:10.5px; color:#E1D0C4; margin-top:2px;">انقضا: {{ limits.expires_at_label }}</div>
+              <div style="font-size:10.5px; color:#E1D0C4; margin:2px 0 6px;">انقضا: {{ limits.expires_at_label }}</div>
+              <div class="lic-progress-row" aria-live="polite">
+                <span>تأمین‌کننده: <b id="sidebar-supplier-count">{{ limits.supplier_count }}</b>/1</span>
+                <span>کالا: <b id="sidebar-product-count">{{ limits.product_count }}</b>/5</span>
+              </div>
+              <div class="lic-bar">
+                <div id="sidebar-product-progress" class="lic-bar-fill" style="width: {{ [((limits.product_count / 5) * 100)|int, 100]|min }}%;"></div>
+              </div>
             </div>
           {% elif limits.is_licensed %}
             <div class="sidebar-license licensed">
@@ -143,12 +150,12 @@
                 <span class="lic-badge">نسخه آزمایشی</span>
                 <span class="lic-action-text">خرید لایسنس ↗</span>
               </div>
-              <div class="lic-progress-row">
-                <span>تأمین‌کننده: {{ limits.supplier_count }}/1</span>
-                <span>کالا: {{ limits.product_count }}/5</span>
+              <div class="lic-progress-row" aria-live="polite">
+                <span>تأمین‌کننده: <b id="sidebar-supplier-count">{{ limits.supplier_count }}</b>/1</span>
+                <span>کالا: <b id="sidebar-product-count">{{ limits.product_count }}</b>/5</span>
               </div>
               <div class="lic-bar">
-                <div class="lic-bar-fill" style="width: {{ [((limits.product_count / 5) * 100)|int, 100]|min }}%;"></div>
+                <div id="sidebar-product-progress" class="lic-bar-fill" style="width: {{ [((limits.product_count / 5) * 100)|int, 100]|min }}%;"></div>
               </div>
             </div>
           {% endif %}
@@ -243,11 +250,11 @@
             <div class="license-quota-box">
               <div class="quota-item">
                 <span class="quota-name">تأمین‌کننده‌های ثبت‌شده:</span>
-                <span class="quota-val mono">{{ limits.supplier_count }} / 1</span>
+                <span class="quota-val mono"><b id="modal-supplier-count">{{ limits.supplier_count }}</b> / 1</span>
               </div>
               <div class="quota-item">
                 <span class="quota-name">محصولات ثبت‌شده:</span>
-                <span class="quota-val mono">{{ limits.product_count }} / 5</span>
+                <span class="quota-val mono"><b id="modal-product-count">{{ limits.product_count }}</b> / 5</span>
               </div>
             </div>
             <div class="license-notice">

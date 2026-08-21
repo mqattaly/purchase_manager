@@ -103,6 +103,7 @@
           }
           showSuccess("تأمین‌کننده اضافه شد");
           addSupplierRow(result.data.id, result.data.name);
+          if (window.DashLive) window.DashLive.onSupplierSaved(result.data.id, result.data.name);
           input.value = "";
           input.focus();
         })
@@ -157,7 +158,10 @@
 
       App.request("/supplier/" + id + "/delete", { method: "POST" })
         .then(function (result) {
-          if (result.ok) return;
+          if (result.ok) {
+            if (window.DashLive) window.DashLive.refresh();
+            return;
+          }
           restoreSupplier(backup);
           showError((result.data && result.data.message) || "حذف انجام نشد");
         })

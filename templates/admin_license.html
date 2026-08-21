@@ -105,6 +105,8 @@
           <tr>
             <th>شناسه</th>
             <th>نام کاربری</th>
+            <th>نام و نام خانوادگی</th>
+            <th>شماره موبایل</th>
             <th>کد فعال‌سازی سیستم</th>
             <th>تأمین‌کننده</th>
             <th>محصولات</th>
@@ -116,6 +118,9 @@
           {% for u in users %}
             <tr data-user-id="{{ u.id }}"
                 data-username="{{ u.username }}"
+                data-first-name="{{ u.first_name }}"
+                data-last-name="{{ u.last_name }}"
+                data-mobile="{{ u.mobile }}"
                 data-user-admin="{{ '1' if u.is_admin else '0' }}"
                 data-user-protected="{{ '1' if u.is_protected else '0' }}"
                 data-user-self="{{ '1' if u.is_self else '0' }}"
@@ -130,6 +135,8 @@
                   <span class="tag tag-accent" style="font-size:10px; margin-right:4px;">مدیر</span>
                 {% endif %}
               </td>
+              <td class="cell-full-name">{{ u.full_name or '—' }}</td>
+              <td class="cell-mobile mono" dir="ltr">{{ u.mobile or '—' }}</td>
               <td class="cell-user-code"><code class="mono">{{ u.user_code }}</code></td>
               <td class="mono">{{ u.supplier_count }}</td>
               <td class="mono">{{ u.product_count }}</td>
@@ -145,7 +152,7 @@
                 {% endif %}
               </td>
               <td class="cell-actions" style="white-space:nowrap;">
-                <button type="button" class="btn btn-ghost btn-sm" onclick="quickGenForUser('{{ u.username }}')" title="تولید کلید لایسنس برای {{ u.username }}">⚡ صدور کلید</button>
+                <button type="button" class="btn btn-ghost btn-sm quick-gen-user" onclick='quickGenForUser({{ u.username|tojson }})' title="تولید کلید لایسنس برای {{ u.username }}">⚡ صدور کلید</button>
                 <button type="button" class="btn btn-ghost btn-sm" onclick="openLicenseEditor({{ u.id }})" title="ویرایش یا حذف لایسنس">🎫 لایسنس</button>
                 <button type="button" class="btn btn-ghost btn-sm" onclick="openUserEditor({{ u.id }})" title="ویرایش کاربر">✏️ ویرایش</button>
                 {% if not u.is_protected and not u.is_self %}
@@ -174,7 +181,23 @@
       </div>
 
       <div class="modal-body">
-        <div class="field-group">
+        <div class="field-row" style="align-items:flex-end;">
+          <div class="field-group" style="flex:1; min-width:150px;">
+            <label class="field-label" for="edit-first-name">نام</label>
+            <input id="edit-first-name" class="field" maxlength="100" autocomplete="off">
+          </div>
+          <div class="field-group" style="flex:1; min-width:150px;">
+            <label class="field-label" for="edit-last-name">نام خانوادگی</label>
+            <input id="edit-last-name" class="field" maxlength="100" autocomplete="off">
+          </div>
+        </div>
+
+        <div class="field-group" style="margin-top:14px;">
+          <label class="field-label" for="edit-mobile">شماره موبایل</label>
+          <input id="edit-mobile" class="field mono" maxlength="20" inputmode="tel" autocomplete="off" dir="ltr" placeholder="09121234567">
+        </div>
+
+        <div class="field-group" style="margin-top:14px;">
           <label class="field-label" for="edit-username">نام کاربری</label>
           <input id="edit-username" class="field" autocomplete="off">
           <div class="page-sub" style="margin-top:6px;">
@@ -388,6 +411,9 @@
       if (!row) return;
       editingUserId = id;
       document.getElementById("user-editor-sub").textContent = "حساب «" + row.dataset.username + "» (شناسه #" + id + ")";
+      document.getElementById("edit-first-name").value = row.dataset.firstName || "";
+      document.getElementById("edit-last-name").value = row.dataset.lastName || "";
+      document.getElementById("edit-mobile").value = row.dataset.mobile || "";
       document.getElementById("edit-username").value = row.dataset.username || "";
       document.getElementById("edit-password").value = "";
 
@@ -399,22 +425,31 @@
       document.getElementById("edit-admin-wrap").style.opacity = locked ? "0.55" : "1";
 
       openAdminModal("user-editor-modal");
-      document.getElementById("edit-username").focus();
+      document.getElementById("edit-first-name").focus();
     }
 
     function saveUserEdits() {
       if (!editingUserId) return;
       const btn = document.getElementById("save-user-btn");
+      const firstName = document.getElementById("edit-first-name").value.trim();
+      const lastName = document.getElementById("edit-last-name").value.trim();
+      const mobile = document.getElementById("edit-mobile").value.trim();
       const username = document.getElementById("edit-username").value.trim();
       const password = document.getElementById("edit-password").value;
       const adminBox = document.getElementById("edit-is-admin");
 
-      if (!username) {
-        showError("نام کاربری را وارد کنید.");
+      if (!firstName || !lastName || !mobile || !username) {
+        showError("نام، نام خانوادگی، شماره موبایل و نام کاربری را کامل وارد کنید.");
         return;
       }
 
-      const form = { username: username, new_password: password };
+      const form = {
+        first_name: firstName,
+        last_name: lastName,
+        mobile: mobile,
+        username: username,
+        new_password: password
+      };
       if (!adminBox.disabled) form.is_admin = adminBox.checked ? "1" : "0";
 
       btn.disabled = true;
@@ -567,6 +602,9 @@
       const row = userRow(user.id);
       if (!row) return;
       row.dataset.username = user.username;
+      row.dataset.firstName = user.first_name || "";
+      row.dataset.lastName = user.last_name || "";
+      row.dataset.mobile = user.mobile || "";
       row.dataset.userAdmin = user.is_admin ? "1" : "0";
       row.dataset.userProtected = user.is_protected ? "1" : "0";
       row.dataset.licensed = user.is_licensed ? "1" : "0";
@@ -577,7 +615,14 @@
       row.querySelector(".cell-username").innerHTML =
         "<strong>" + escapeHtml(user.username) + "</strong>" +
         (user.is_admin ? ' <span class="tag tag-accent" style="font-size:10px; margin-right:4px;">مدیر</span>' : "");
+      row.querySelector(".cell-full-name").textContent = user.full_name || "—";
+      row.querySelector(".cell-mobile").textContent = user.mobile || "—";
       row.querySelector(".cell-user-code").innerHTML = '<code class="mono">' + escapeHtml(user.user_code) + "</code>";
+      const quickButton = row.querySelector(".quick-gen-user");
+      if (quickButton) {
+        quickButton.onclick = function () { quickGenForUser(user.username); };
+        quickButton.title = "تولید کلید لایسنس برای " + user.username;
+      }
       row.querySelector(".cell-license").innerHTML = licenseStatusHtml(user);
     }
 

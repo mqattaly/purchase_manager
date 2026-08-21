@@ -98,15 +98,23 @@
 
   /**
    * Optimistic helper: the UI has already changed, this only reverts on failure.
-   * background(url, options, onFail)
+   * background(url, options, onFail, onSuccess)
    */
-  function background(url, options, onFail) {
+  function background(url, options, onFail, onSuccess) {
     const opts = Object.assign({ method: "POST" }, options || {});
     return request(url, opts)
       .then(function (result) {
-        if (!result.ok) onFail(result.data && result.data.message);
+        if (!result.ok) {
+          onFail(result.data && result.data.message);
+        } else if (typeof onSuccess === "function") {
+          onSuccess(result.data || {});
+        }
+        return result;
       })
-      .catch(function () { onFail("خطا در ارتباط با سرور"); });
+      .catch(function () {
+        onFail("خطا در ارتباط با سرور");
+        return null;
+      });
   }
 
   /* ------------------------------------------------------------ entrance */
@@ -455,6 +463,55 @@
       this.focusStart();
     },
 
+    setProductAvailability(canAdd) {
+      if (!this.root || this.root.dataset.isLicensed === "true") return;
+
+      const allowed = Boolean(canAdd);
+      this.root.dataset.canAddProduct = allowed ? "true" : "false";
+
+      [this.product, this.quantity, this.description].forEach(function (field) {
+        if (field) field.disabled = !allowed;
+      });
+      if (this.unitChips) {
+        this.unitChips.querySelectorAll(".unit-chip").forEach(function (chip) {
+          chip.disabled = !allowed;
+        });
+      }
+
+      const button = this.root.querySelector("#qa-submit-btn");
+      if (button) {
+        button.disabled = !allowed;
+        button.title = allowed
+          ? "ثبت خرید"
+          : "برای ثبت محصولات بیشتر لایسنس تهیه کنید";
+        button.innerHTML = allowed
+          ? '<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg> ثبت'
+          : '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg> قفل (نیاز به لایسنس)';
+      }
+
+      const lock = this.root.querySelector("#qa-product-lock");
+      if (lock) lock.hidden = allowed;
+    },
+
+    setSupplierAvailability(canAdd) {
+      if (!this.root || this.root.dataset.isLicensed === "true" || !this.supplier) return;
+
+      const allowed = Boolean(canAdd);
+      this.root.dataset.canAddSupplier = allowed ? "true" : "false";
+      const option = this.supplier.querySelector(
+        'option[value="__new__"], option[value="__locked_supplier__"]'
+      );
+      if (option) {
+        option.value = allowed ? "__new__" : "__locked_supplier__";
+        option.textContent = allowed
+          ? "＋ تأمین‌کننده جدید…"
+          : "🔒 ＋ تأمین‌کننده جدید (نیاز به لایسنس)";
+      }
+      if (!allowed && this.newSupplierBox && !this.newSupplierBox.hidden) {
+        this.newSupplierBox.hidden = true;
+      }
+    },
+
     /* ---------------------------------------------------------- keyboard */
 
     bindKeyboard() {
@@ -725,8 +782,7 @@
           );
 
           if (typeof window.DashLive !== "undefined") {
-            window.DashLive.addSupplier(result.data.id, result.data.name, 0);
-            window.DashLive.scheduleRefresh();
+            window.DashLive.onSupplierSaved(result.data.id, result.data.name);
           }
         })
         .catch(() => {
@@ -1543,8 +1599,10 @@
         return;
       }
 
+      let savedId = null;
       this.whenSaved(key)
         .then(function (id) {
+          savedId = id;
           return request(
             "/product/" +
             id +
@@ -1558,7 +1616,7 @@
           if (result.ok) {
             this.saves.delete(key);
             if (typeof window.DashLive !== "undefined") {
-              window.DashLive.onProductRemoved(id, supplierId);
+              window.DashLive.onProductRemoved(savedId, supplierId);
             }
             return;
           }
@@ -1838,6 +1896,47 @@
       return next;
     },
 
+    quotaElement(kind) {
+      return (
+        document.getElementById("sidebar-" + kind + "-count") ||
+        document.getElementById("modal-" + kind + "-count")
+      );
+    },
+
+    setQuota(kind, value, maxValue) {
+      const count = Math.max(0, parseInt(value, 10) || 0);
+      ["sidebar-", "modal-"].forEach(function (prefix) {
+        const el = document.getElementById(prefix + kind + "-count");
+        if (el) el.textContent = count;
+      });
+
+      if (QuickAdd.root) {
+        QuickAdd.root.dataset[kind + "Count"] = String(count);
+      }
+
+      if (kind === "product") {
+        const progress = document.getElementById("sidebar-product-progress");
+        const max = Math.max(1, parseInt(maxValue, 10) || 5);
+        if (progress) progress.style.width = Math.min(100, (count / max) * 100) + "%";
+      }
+      return count;
+    },
+
+    bumpQuota(kind, delta, maxValue) {
+      let current = 0;
+      const el = this.quotaElement(kind);
+      if (el) {
+        current = parseInt(el.textContent, 10) || 0;
+      } else if (QuickAdd.root) {
+        current = parseInt(QuickAdd.root.dataset[kind + "Count"], 10) || 0;
+      }
+      const max = Math.max(1, parseInt(maxValue, 10) || (kind === "product" ? 5 : 1));
+      const next = this.setQuota(kind, current + delta, max);
+      if (kind === "product") QuickAdd.setProductAvailability(next < max);
+      if (kind === "supplier") QuickAdd.setSupplierAvailability(next < max);
+      return next;
+    },
+
     setActive(n) {
       const el = document.getElementById("stat-active");
       if (el) el.textContent = n;
@@ -1873,6 +1972,12 @@
       if (stat) stat.textContent = grid.querySelectorAll("[data-supplier-id]").length;
     },
 
+    onSupplierSaved(id, name) {
+      this.bumpQuota("supplier", 1, 1);
+      this.addSupplier(id, name, 0);
+      this.scheduleRefresh();
+    },
+
     bumpSupplier(supplierId, delta) {
       const card = document.querySelector('#dash-supplier-grid [data-supplier-id="' + supplierId + '"] [data-count]');
       if (card) this.bump(card, delta);
@@ -1890,8 +1995,12 @@
      * earlier (even from another device) are always included.
      */
     refresh() {
-      if (!document.getElementById("dash-supplier-grid")) return Promise.resolve(null);
-      return request("/api/dashboard/stats")
+      const hasDashboard = document.getElementById("dash-supplier-grid");
+      const hasLiveQuota =
+        document.getElementById("sidebar-product-count") ||
+        document.getElementById("sidebar-supplier-count");
+      if (!hasDashboard && !hasLiveQuota) return Promise.resolve(null);
+      return request("/api/dashboard/stats", { cache: "no-store" })
         .then(function (result) {
           if (!result.ok || !result.data || !result.data.suppliers) return null;
           DashLive.applyStats(result.data);
@@ -1909,6 +2018,19 @@
     },
 
     applyStats(stats) {
+      if (typeof stats.product_count === "number") {
+        this.setQuota("product", stats.product_count, stats.max_products || 5);
+      }
+      if (typeof stats.supplier_count === "number") {
+        this.setQuota("supplier", stats.supplier_count, stats.max_suppliers || 1);
+      }
+      if (typeof stats.can_add_product === "boolean") {
+        QuickAdd.setProductAvailability(stats.can_add_product);
+      }
+      if (typeof stats.can_add_supplier === "boolean") {
+        QuickAdd.setSupplierAvailability(stats.can_add_supplier);
+      }
+
       const active = document.getElementById("stat-active");
       if (active && typeof stats.active_count === "number") active.textContent = stats.active_count;
 
@@ -1941,6 +2063,7 @@
     },
 
     onProductSaved(product) {
+      this.bumpQuota("product", 1, 5);
       this.bump(document.getElementById("stat-active"), 1);
       const total = document.getElementById("dash-recent-total");
       if (total) this.bump(total, 1);
@@ -1950,6 +2073,7 @@
     },
 
     onProductRemoved(id, supplierId) {
+      this.bumpQuota("product", -1, 5);
       this.bump(document.getElementById("stat-active"), -1);
       const total = document.getElementById("dash-recent-total");
       if (total) this.bump(total, -1);

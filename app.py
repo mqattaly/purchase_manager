@@ -172,6 +172,36 @@ def normalize_name(name):
     return name.strip().lower()
 
 
+_DIGIT_TRANSLATION = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+
+
+def clean_person_name(value, max_length=100):
+    """Normalize whitespace and Arabic keyboard variants in profile names."""
+    value = " ".join((value or "").split())
+    return value.replace("ي", "ی").replace("ك", "ک")[:max_length]
+
+
+def normalize_mobile(value):
+    """Return an Iranian mobile number in canonical ``09xxxxxxxxx`` form.
+
+    Persian/Arabic digits and common +98/0098 forms are accepted so users do
+    not have to switch keyboards while signing up.
+    """
+    raw = (value or "").strip().translate(_DIGIT_TRANSLATION)
+    digits = "".join(char for char in raw if char.isdigit())
+
+    if digits.startswith("0098"):
+        digits = "0" + digits[4:]
+    elif digits.startswith("98"):
+        digits = "0" + digits[2:]
+    elif len(digits) == 10 and digits.startswith("9"):
+        digits = "0" + digits
+
+    if len(digits) == 11 and digits.startswith("09"):
+        return digits
+    return None
+
+
 # ترتیب الفبای فارسی — چون مرتب‌سازی پیش‌فرض دیتابیس روی حروف فارسی درست نیست
 PERSIAN_ALPHABET = "آابپتثجچحخدذرزژسشصضطظعغفقکگلمنوهی"
 _PERSIAN_RANK = {ch: index for index, ch in enumerate(PERSIAN_ALPHABET)}
@@ -259,6 +289,10 @@ class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(100), unique=True, nullable=False)
     password_hash = db.Column(db.String(300), nullable=False)
+    # اطلاعات تماس؛ nullable می‌مانند تا حساب‌های قدیمی بدون مهاجرت اجباری کار کنند.
+    first_name = db.Column(db.String(100), nullable=True)
+    last_name = db.Column(db.String(100), nullable=True)
+    mobile = db.Column(db.String(20), nullable=True)
     # کلید شخصی برای ثبت از بیرون اپ (مثلاً Shortcuts آیفون)
     api_token = db.Column(db.String(64), unique=True, nullable=True)
     # لایسنس نرم‌افزار لیستیا
@@ -482,6 +516,8 @@ def dashboard_counters():
     return {
         "active_count": active_count,
         "archived_count": archived_count,
+        # The trial quota counts every saved product, including archived ones.
+        "product_count": active_count + archived_count,
         "supplier_count": len(user_suppliers()),
         "suppliers": active_counts_by_supplier(),
     }
@@ -580,6 +616,28 @@ def ensure_schema():
                 pass
 
         if user_cols:
+            # Lightweight in-place migration for the PostgreSQL service and
+            # existing SQLite installations. New databases already get these
+            # columns from ``db.create_all`` above.
+            profile_columns = {
+                "first_name": "VARCHAR(100)",
+                "last_name": "VARCHAR(100)",
+                "mobile": "VARCHAR(20)",
+            }
+            for column_name, column_type in profile_columns.items():
+                if column_name not in user_cols:
+                    try:
+                        # A savepoint prevents one concurrent/failed ALTER from
+                        # aborting the whole PostgreSQL migration transaction.
+                        with conn.begin_nested():
+                            conn.execute(
+                                text(
+                                    f'ALTER TABLE "user" ADD COLUMN {column_name} {column_type}'
+                                )
+                            )
+                    except Exception:
+                        pass
+
             if "api_token" not in user_cols:
                 try:
                     conn.execute(text('ALTER TABLE "user" ADD COLUMN api_token VARCHAR(64)'))
@@ -882,12 +940,24 @@ def signup():
         return redirect("/")
 
     if request.method == "POST":
-        username = request.form.get("username", "").strip()
+        first_name = clean_person_name(request.form.get("first_name", ""))
+        last_name = clean_person_name(request.form.get("last_name", ""))
+        mobile_raw = request.form.get("mobile", "")
+        mobile = normalize_mobile(mobile_raw)
+        username = request.form.get("username", "").strip()[:100]
         password = request.form.get("password", "")
 
-        if not username or not password:
+        if not first_name or not last_name or not mobile_raw.strip() or not username or not password:
             return render_template(
-                "login.html", mode="signup", error="نام کاربری و رمز عبور الزامی است."
+                "login.html",
+                mode="signup",
+                error="نام، نام خانوادگی، شماره موبایل، نام کاربری و رمز عبور الزامی است.",
+            )
+        if not mobile:
+            return render_template(
+                "login.html",
+                mode="signup",
+                error="شماره موبایل معتبر نیست؛ شماره را مانند ۰۹۱۲۱۲۳۴۵۶۷ وارد کنید.",
             )
         if len(username) < 2:
             return render_template(
@@ -906,6 +976,9 @@ def signup():
         user = User(
             username=username,
             password_hash=generate_password_hash(password),
+            first_name=first_name,
+            last_name=last_name,
+            mobile=mobile,
             is_licensed=is_admin_account,
             license_type="UNLIMITED" if is_admin_account else "free",
             is_admin=is_admin_account,
@@ -1453,9 +1526,10 @@ def import_excel():
 # ---------------------------------------------------------------------------
 
 
-def resolve_supplier(user, raw):
+def resolve_supplier(user, raw, limits=None):
     """تأمین‌کننده را از روی شناسه یا نام پیدا می‌کند؛ نبود، با بررسی لایسنس می‌سازدش."""
     raw = (raw or "").strip()
+    limits = limits or get_user_limits(user)
 
     if raw.isdigit():
         found = Supplier.query.filter_by(id=int(raw), owner_id=user.id).first()
@@ -1468,9 +1542,7 @@ def resolve_supplier(user, raw):
             if normalize_name(supplier.name) == target:
                 return supplier, False, None
 
-        s_count = Supplier.query.filter_by(owner_id=user.id).count()
-        user_licensed = bool(user.is_licensed or is_admin_user(user))
-        if not user_licensed and s_count >= FREE_MAX_SUPPLIERS:
+        if not limits["can_add_supplier"]:
             return None, False, "سقف ۱ تأمین‌کننده نسخه آزمایشی پر شده است. نیاز به لایسنس."
 
         created = Supplier(name=raw, owner_id=user.id)
@@ -1490,9 +1562,7 @@ def resolve_supplier(user, raw):
     if first:
         return first, False, None
 
-    s_count = Supplier.query.filter_by(owner_id=user.id).count()
-    user_licensed = bool(user.is_licensed or is_admin_user(user))
-    if not user_licensed and s_count >= FREE_MAX_SUPPLIERS:
+    if not limits["can_add_supplier"]:
         return None, False, "سقف ۱ تأمین‌کننده نسخه آزمایشی پر شده است. نیاز به لایسنس."
 
     created = Supplier(name="نامشخص", owner_id=user.id)
@@ -1508,9 +1578,8 @@ def api_quick_add():
     if not user:
         return json_error("کلید معتبر نیست.", 401)
 
-    user_licensed = bool(user.is_licensed or is_admin_user(user))
-    p_count = Product.query.filter_by(owner_id=user.id).count()
-    if not user_licensed and p_count >= FREE_MAX_PRODUCTS:
+    limits = get_user_limits(user)
+    if not limits["can_add_product"]:
         return json_error(
             "سقف ۵ محصول در نسخه آزمایشی تکمیل شده است. برای ثبت محصولات بیشتر باید لایسنس تهیه کنید.",
             403,
@@ -1534,7 +1603,7 @@ def api_quick_add():
     if unit not in UNIT_TYPES:
         return json_error("واحد باید یکی از این‌ها باشد: " + "، ".join(UNIT_TYPES))
 
-    supplier, supplier_created, err = resolve_supplier(user, field("supplier"))
+    supplier, supplier_created, err = resolve_supplier(user, field("supplier"), limits)
     if err:
         return json_error(err, 403, {"license_locked": True})
 
@@ -1579,21 +1648,28 @@ def api_suppliers():
 
 @app.route("/api/dashboard/stats")
 def api_dashboard_stats():
-    """شمارنده‌های زنده داشبورد (سفارش فعال، آرشیو و تعداد هر تأمین‌کننده).
+    """شمارنده‌های زنده داشبورد و سهمیه آزمایشی سایدبار.
 
-    داشبورد بعد از باز شدن صفحه و بعد از هر تغییر این را می‌خواند تا عددهای
-    کارت تأمین‌کننده‌ها دقیقاً با دیتابیس یکی باشد؛ حتی برای محصولاتی که
-    قبلاً ثبت شده‌اند.
+    رابط بعد از باز شدن صفحه و هر تغییر این مسیر را می‌خواند تا تعداد کل
+    محصول/تأمین‌کننده و کارت‌های داشبورد دقیقاً با دیتابیس یکی باشند؛ حتی
+    برای داده‌های ثبت‌شده در نسخه‌های قبلی یا دستگاه دیگر.
     """
     if not current_user.is_authenticated:
         return json_error("ابتدا وارد شوید.", 401)
 
     counters = dashboard_counters()
+    limits = get_user_limits(current_user)
     return {
         "success": True,
         "active_count": counters["active_count"],
         "archived_count": counters["archived_count"],
+        "product_count": counters["product_count"],
         "supplier_count": counters["supplier_count"],
+        "max_products": limits["max_products"],
+        "max_suppliers": limits["max_suppliers"],
+        "can_add_product": limits["can_add_product"],
+        "can_add_supplier": limits["can_add_supplier"],
+        "is_licensed": limits["is_licensed"],
         "suppliers": [
             {
                 "id": s.id,
@@ -1658,6 +1734,12 @@ def admin_user_payload(user):
     return {
         "id": user.id,
         "username": user.username,
+        "first_name": user.first_name or "",
+        "last_name": user.last_name or "",
+        "full_name": " ".join(
+            part for part in (user.first_name or "", user.last_name or "") if part
+        ),
+        "mobile": user.mobile or "",
         "user_code": user_limits["user_code"],
         "is_licensed": user_limits["is_licensed"],
         "is_expired": user_limits["is_expired"],
@@ -1709,7 +1791,7 @@ def admin_license_generator():
 
 @app.route("/api/admin/users/<int:user_id>/update", methods=["POST"])
 def api_admin_update_user(user_id):
-    """ویرایش کاربر توسط مدیر: نام کاربری، رمز عبور و دسترسی مدیریت."""
+    """ویرایش مشخصات، نام کاربری، رمز عبور و دسترسی کاربر توسط مدیر."""
     user, error = admin_target_user(user_id)
     if error:
         return error
@@ -1719,6 +1801,32 @@ def api_admin_update_user(user_id):
     admin_flag = request.form.get("is_admin")
 
     changes = []
+
+    # These keys are optional for backward-compatible API clients, but when the
+    # admin form sends them they must be complete and valid.
+    if "first_name" in request.form:
+        first_name = clean_person_name(request.form.get("first_name", ""))
+        if not first_name:
+            return json_error("نام کاربر را وارد کنید.")
+        if first_name != (user.first_name or ""):
+            user.first_name = first_name
+            changes.append("نام تغییر کرد")
+
+    if "last_name" in request.form:
+        last_name = clean_person_name(request.form.get("last_name", ""))
+        if not last_name:
+            return json_error("نام خانوادگی کاربر را وارد کنید.")
+        if last_name != (user.last_name or ""):
+            user.last_name = last_name
+            changes.append("نام خانوادگی تغییر کرد")
+
+    if "mobile" in request.form:
+        mobile = normalize_mobile(request.form.get("mobile", ""))
+        if not mobile:
+            return json_error("شماره موبایل معتبر نیست؛ شماره را مانند ۰۹۱۲۱۲۳۴۵۶۷ وارد کنید.")
+        if mobile != (user.mobile or ""):
+            user.mobile = mobile
+            changes.append("شماره موبایل تغییر کرد")
 
     if username and username != user.username:
         if len(username) < 2:
