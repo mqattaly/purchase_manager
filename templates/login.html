@@ -114,10 +114,15 @@
       {% endif %}
 
       {% if mode == 'signup' %}
-        <div class="login-hint">حساب جدید آزمایشی: شامل ۱ تأمین‌کننده و ۵ محصول برای شروع سریع.</div>
+        <div class="login-hint">حساب جدید آزمایشی: شامل ۱ تأمین‌کننده و ۵ محصول برای شروع سریع. صدور لایسنس و پشتیبانی با همین مشخصات انجام می‌شود.</div>
         <form method="POST" action="/signup">
-          <input class="login-field" name="username" placeholder="نام کاربری" autocomplete="username" required autofocus>
-          <input class="login-field" name="password" type="password" placeholder="رمز عبور" autocomplete="new-password" required>
+          <div style="display:flex; gap:8px;">
+            <input class="login-field" name="first_name" placeholder="نام" autocomplete="given-name" maxlength="100" value="{{ request.form.get('first_name', '') }}" required autofocus>
+            <input class="login-field" name="last_name" placeholder="نام خانوادگی" autocomplete="family-name" maxlength="100" value="{{ request.form.get('last_name', '') }}" required>
+          </div>
+          <input class="login-field" name="phone" type="tel" inputmode="tel" dir="ltr" style="text-align:left;" placeholder="شماره موبایل — 09123456789" autocomplete="tel" maxlength="20" value="{{ request.form.get('phone', '') }}" required>
+          <input class="login-field" name="username" placeholder="نام کاربری (برای ورود)" autocomplete="username" maxlength="100" value="{{ request.form.get('username', '') }}" required>
+          <input class="login-field" name="password" type="password" placeholder="رمز عبور (حداقل ۶ کاراکتر)" autocomplete="new-password" minlength="6" required>
           <button type="submit" class="login-btn signup">ساخت حساب کاربری</button>
         </form>
         <div class="login-switch">

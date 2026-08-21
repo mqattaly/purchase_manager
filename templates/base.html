@@ -143,12 +143,13 @@
                 <span class="lic-badge">نسخه آزمایشی</span>
                 <span class="lic-action-text">خرید لایسنس ↗</span>
               </div>
+              {# شمارنده‌های سهمیه — به‌صورت زنده (بدون رفرش) به‌روز می‌شوند #}
               <div class="lic-progress-row">
-                <span>تأمین‌کننده: {{ limits.supplier_count }}/1</span>
-                <span>کالا: {{ limits.product_count }}/5</span>
+                <span>تأمین‌کننده: <b id="sidebar-quota-suppliers">{{ limits.supplier_count }}/{{ limits.max_suppliers or 1 }}</b></span>
+                <span>کالا: <b id="sidebar-quota-products">{{ limits.product_count }}/{{ limits.max_products or 5 }}</b></span>
               </div>
               <div class="lic-bar">
-                <div class="lic-bar-fill" style="width: {{ [((limits.product_count / 5) * 100)|int, 100]|min }}%;"></div>
+                <div class="lic-bar-fill" id="sidebar-quota-bar" style="width: {{ [((limits.product_count / (limits.max_products or 5)) * 100)|int, 100]|min }}%;"></div>
               </div>
             </div>
           {% endif %}
@@ -157,8 +158,14 @@
 
       <div class="sidebar-user">
         {% if current_user.is_authenticated %}
-          <span class="sidebar-avatar">{{ current_user.username[:1]|upper }}</span>
-          <span class="sidebar-username">{{ current_user.username }}</span>
+          {% set _full_name = ((current_user.first_name or '') ~ ' ' ~ (current_user.last_name or ''))|trim %}
+          <span class="sidebar-avatar">{{ ((_full_name or current_user.username)[:1])|upper }}</span>
+          <span class="sidebar-user-text">
+            <span class="sidebar-username">{{ _full_name or current_user.username }}</span>
+            {% if _full_name %}
+              <span class="sidebar-user-sub">{{ current_user.username }}</span>
+            {% endif %}
+          </span>
         {% endif %}
         <a href="/logout" class="sidebar-logout" title="خروج">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
@@ -243,11 +250,11 @@
             <div class="license-quota-box">
               <div class="quota-item">
                 <span class="quota-name">تأمین‌کننده‌های ثبت‌شده:</span>
-                <span class="quota-val mono">{{ limits.supplier_count }} / 1</span>
+                <span class="quota-val mono" id="modal-quota-suppliers">{{ limits.supplier_count }} / {{ limits.max_suppliers or 1 }}</span>
               </div>
               <div class="quota-item">
                 <span class="quota-name">محصولات ثبت‌شده:</span>
-                <span class="quota-val mono">{{ limits.product_count }} / 5</span>
+                <span class="quota-val mono" id="modal-quota-products">{{ limits.product_count }} / {{ limits.max_products or 5 }}</span>
               </div>
             </div>
             <div class="license-notice">

@@ -116,6 +116,9 @@
           {% for u in users %}
             <tr data-user-id="{{ u.id }}"
                 data-username="{{ u.username }}"
+                data-first-name="{{ u.first_name }}"
+                data-last-name="{{ u.last_name }}"
+                data-phone="{{ u.phone }}"
                 data-user-admin="{{ '1' if u.is_admin else '0' }}"
                 data-user-protected="{{ '1' if u.is_protected else '0' }}"
                 data-user-self="{{ '1' if u.is_self else '0' }}"
@@ -128,6 +131,12 @@
                 <strong>{{ u.username }}</strong>
                 {% if u.is_admin %}
                   <span class="tag tag-accent" style="font-size:10px; margin-right:4px;">مدیر</span>
+                {% endif %}
+                {% if u.full_name %}
+                  <div class="cell-sub">{{ u.full_name }}</div>
+                {% endif %}
+                {% if u.phone %}
+                  <div class="cell-sub mono" dir="ltr" style="text-align:right;">{{ u.phone }}</div>
                 {% endif %}
               </td>
               <td class="cell-user-code"><code class="mono">{{ u.user_code }}</code></td>
@@ -182,9 +191,25 @@
           </div>
         </div>
 
+        <div class="field-row" style="margin-top:14px;">
+          <div class="field-group" style="flex:1; min-width:130px;">
+            <label class="field-label" for="edit-first-name">نام</label>
+            <input id="edit-first-name" class="field" autocomplete="off" maxlength="100">
+          </div>
+          <div class="field-group" style="flex:1; min-width:150px;">
+            <label class="field-label" for="edit-last-name">نام خانوادگی</label>
+            <input id="edit-last-name" class="field" autocomplete="off" maxlength="100">
+          </div>
+        </div>
+
+        <div class="field-group" style="margin-top:14px;">
+          <label class="field-label" for="edit-phone">شماره موبایل</label>
+          <input id="edit-phone" class="field mono" dir="ltr" style="text-align:left;" placeholder="09123456789" autocomplete="off" maxlength="20">
+        </div>
+
         <div class="field-group" style="margin-top:14px;">
           <label class="field-label" for="edit-password">رمز عبور جدید (خالی بگذارید تا تغییر نکند)</label>
-          <input id="edit-password" class="field" type="text" autocomplete="off" placeholder="حداقل ۴ کاراکتر">
+          <input id="edit-password" class="field" type="text" autocomplete="off" placeholder="حداقل ۶ کاراکتر">
         </div>
 
         <label id="edit-admin-wrap" style="display:flex; align-items:center; gap:8px; margin-top:14px; font-size:13px; font-weight:600; cursor:pointer;">
@@ -389,6 +414,9 @@
       editingUserId = id;
       document.getElementById("user-editor-sub").textContent = "حساب «" + row.dataset.username + "» (شناسه #" + id + ")";
       document.getElementById("edit-username").value = row.dataset.username || "";
+      document.getElementById("edit-first-name").value = row.dataset.firstName || "";
+      document.getElementById("edit-last-name").value = row.dataset.lastName || "";
+      document.getElementById("edit-phone").value = row.dataset.phone || "";
       document.getElementById("edit-password").value = "";
 
       const adminBox = document.getElementById("edit-is-admin");
@@ -406,6 +434,9 @@
       if (!editingUserId) return;
       const btn = document.getElementById("save-user-btn");
       const username = document.getElementById("edit-username").value.trim();
+      const firstName = document.getElementById("edit-first-name").value.trim();
+      const lastName = document.getElementById("edit-last-name").value.trim();
+      const phone = document.getElementById("edit-phone").value.trim();
       const password = document.getElementById("edit-password").value;
       const adminBox = document.getElementById("edit-is-admin");
 
@@ -413,8 +444,18 @@
         showError("نام کاربری را وارد کنید.");
         return;
       }
+      if (!firstName || !lastName) {
+        showError("نام و نام خانوادگی را کامل وارد کنید.");
+        return;
+      }
 
-      const form = { username: username, new_password: password };
+      const form = {
+        username: username,
+        new_password: password,
+        first_name: firstName,
+        last_name: lastName,
+        phone: phone
+      };
       if (!adminBox.disabled) form.is_admin = adminBox.checked ? "1" : "0";
 
       btn.disabled = true;
@@ -567,6 +608,9 @@
       const row = userRow(user.id);
       if (!row) return;
       row.dataset.username = user.username;
+      row.dataset.firstName = user.first_name || "";
+      row.dataset.lastName = user.last_name || "";
+      row.dataset.phone = user.phone || "";
       row.dataset.userAdmin = user.is_admin ? "1" : "0";
       row.dataset.userProtected = user.is_protected ? "1" : "0";
       row.dataset.licensed = user.is_licensed ? "1" : "0";
@@ -576,7 +620,9 @@
 
       row.querySelector(".cell-username").innerHTML =
         "<strong>" + escapeHtml(user.username) + "</strong>" +
-        (user.is_admin ? ' <span class="tag tag-accent" style="font-size:10px; margin-right:4px;">مدیر</span>' : "");
+        (user.is_admin ? ' <span class="tag tag-accent" style="font-size:10px; margin-right:4px;">مدیر</span>' : "") +
+        (user.full_name ? '<div class="cell-sub">' + escapeHtml(user.full_name) + "</div>" : "") +
+        (user.phone ? '<div class="cell-sub mono" dir="ltr" style="text-align:right;">' + escapeHtml(user.phone) + "</div>" : "");
       row.querySelector(".cell-user-code").innerHTML = '<code class="mono">' + escapeHtml(user.user_code) + "</code>";
       row.querySelector(".cell-license").innerHTML = licenseStatusHtml(user);
     }

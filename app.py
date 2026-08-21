@@ -1,4 +1,5 @@
 import os
+import re
 import secrets
 from datetime import date, datetime, timedelta
 
@@ -138,6 +139,8 @@ def _allow_iframe_preview(response):
     # Arena shows the app inside an iframe; don't block embedding.
     response.headers.pop("X-Frame-Options", None)
     response.headers["Content-Security-Policy"] = "frame-ancestors *"
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     cookies = response.headers.getlist("Set-Cookie")
     if cookies:
         response.headers.remove("Set-Cookie")
@@ -170,6 +173,37 @@ def normalize_name(name):
     name = " ".join((name or "").split())
     name = name.replace("ي", "ی").replace("ك", "ک")
     return name.strip().lower()
+
+
+_FA_DIGITS_TRANS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
+
+
+def normalize_phone(raw):
+    """شماره موبایل ایران را به قالب استاندارد 09xxxxxxxxx برمی‌گرداند.
+
+    خروجی: رشته نرمال‌شده، «» برای ورودی خالی، یا None برای شماره نامعتبر.
+    ارقام فارسی/عربی و پیش‌شماره‌های +98 / 98 / 0098 هم پشتیبانی می‌شوند.
+    """
+    text = (raw or "").strip().translate(_FA_DIGITS_TRANS)
+    if not text:
+        return ""
+    digits = re.sub(r"\D", "", text)
+    if digits.startswith("0098") and len(digits) == 14:
+        digits = "0" + digits[4:]
+    elif digits.startswith("98") and len(digits) == 12:
+        digits = "0" + digits[2:]
+    elif len(digits) == 10 and digits.startswith("9"):
+        digits = "0" + digits
+    if re.fullmatch(r"09\d{9}", digits):
+        return digits
+    return None
+
+
+def clean_person_name(raw):
+    """نام/نام خانوادگی: فقط حروف و فاصله، بدون اعداد و علائم اضافی."""
+    text = " ".join((raw or "").split())
+    text = text.replace("ي", "ی").replace("ك", "ک")
+    return text[:100]
 
 
 # ترتیب الفبای فارسی — چون مرتب‌سازی پیش‌فرض دیتابیس روی حروف فارسی درست نیست
@@ -214,18 +248,28 @@ def cached_limits():
     return g.limits
 
 
-_login_attempts = {}
+# محدودکننده نرخ ساده در حافظه (ورود، ثبت‌نام) — برای هر IP جداگانه
+_rate_buckets = {}
 
 
-def login_is_throttled(ip):
+def is_throttled(bucket, key, limit=12, window=300):
     now = time.time()
-    stamps = [t for t in _login_attempts.get(ip, []) if now - t < 300]
-    _login_attempts[ip] = stamps
-    return len(stamps) >= 12
+    store_key = f"{bucket}:{key}"
+    stamps = [t for t in _rate_buckets.get(store_key, []) if now - t < window]
+    _rate_buckets[store_key] = stamps
+    return len(stamps) >= limit
 
 
-def record_login_fail(ip):
-    _login_attempts.setdefault(ip, []).append(time.time())
+def record_attempt(bucket, key):
+    _rate_buckets.setdefault(f"{bucket}:{key}", []).append(time.time())
+
+
+def clear_attempts(bucket, key):
+    _rate_buckets.pop(f"{bucket}:{key}", None)
+
+
+def _request_ip():
+    return request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
 
 
 def shamsi_label(value):
@@ -259,6 +303,10 @@ class User(UserMixin, db.Model):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(100), unique=True, nullable=False)
     password_hash = db.Column(db.String(300), nullable=False)
+    # مشخصات کاربر (برای پشتیبانی و صدور لایسنس)
+    first_name = db.Column(db.String(100), nullable=True)
+    last_name = db.Column(db.String(100), nullable=True)
+    phone = db.Column(db.String(20), nullable=True)
     # کلید شخصی برای ثبت از بیرون اپ (مثلاً Shortcuts آیفون)
     api_token = db.Column(db.String(64), unique=True, nullable=True)
     # لایسنس نرم‌افزار لیستیا
@@ -284,8 +332,13 @@ def is_admin_user(user=None):
     return bool(getattr(user, "is_admin", False) or (user.username and user.username.lower() in ADMIN_USERNAMES))
 
 
-def get_user_limits(user=None):
-    """محاسبه وضعیت سهمیه، مدت اعتبار و لایسنس کاربر"""
+def get_user_limits(user=None, s_count=None, p_count=None):
+    """محاسبه وضعیت سهمیه، مدت اعتبار و لایسنس کاربر.
+
+    s_count / p_count اختیاری‌اند؛ پنل مدیریت که برای چند کاربر صدا زده می‌شود
+    شمارش‌ها را یک‌جا (GROUP BY) پاس می‌دهد تا به‌ازای هر کاربر دو کوئری اضافه
+    اجرا نشود.
+    """
     if user is None:
         if current_user.is_authenticated:
             user = current_user
@@ -337,8 +390,10 @@ def get_user_limits(user=None):
                 remaining_days = 0
                 expires_label = shamsi_label(user.license_expires_at.date())
 
-    s_count = Supplier.query.filter_by(owner_id=user.id).count()
-    p_count = Product.query.filter_by(owner_id=user.id).count()
+    if s_count is None:
+        s_count = Supplier.query.filter_by(owner_id=user.id).count()
+    if p_count is None:
+        p_count = Product.query.filter_by(owner_id=user.id).count()
 
     return {
         "is_licensed": is_lic,
@@ -587,7 +642,7 @@ def ensure_schema():
                     pass
             if "is_licensed" not in user_cols:
                 try:
-                    conn.execute(text('ALTER TABLE "user" ADD COLUMN is_licensed BOOLEAN DEFAULT 0'))
+                    conn.execute(text('ALTER TABLE "user" ADD COLUMN is_licensed BOOLEAN DEFAULT FALSE'))
                 except Exception:
                     pass
             if "license_key" not in user_cols:
@@ -612,7 +667,22 @@ def ensure_schema():
                     pass
             if "is_admin" not in user_cols:
                 try:
-                    conn.execute(text('ALTER TABLE "user" ADD COLUMN is_admin BOOLEAN DEFAULT 0'))
+                    conn.execute(text('ALTER TABLE "user" ADD COLUMN is_admin BOOLEAN DEFAULT FALSE'))
+                except Exception:
+                    pass
+            if "first_name" not in user_cols:
+                try:
+                    conn.execute(text('ALTER TABLE "user" ADD COLUMN first_name VARCHAR(100)'))
+                except Exception:
+                    pass
+            if "last_name" not in user_cols:
+                try:
+                    conn.execute(text('ALTER TABLE "user" ADD COLUMN last_name VARCHAR(100)'))
+                except Exception:
+                    pass
+            if "phone" not in user_cols:
+                try:
+                    conn.execute(text('ALTER TABLE "user" ADD COLUMN phone VARCHAR(20)'))
                 except Exception:
                     pass
 
@@ -650,10 +720,12 @@ def ensure_schema():
             except Exception:
                 pass
 
+        # مقدار TRUE/FALSE هم در PostgreSQL و هم در SQLite معتبر است؛
+        # نسخه قبلی با 0/1 در Postgres بی‌صدا خطا می‌خورد.
         try:
             conn.execute(
                 text(
-                    "UPDATE \"user\" SET is_licensed = 1, is_admin = 1, license_type = 'UNLIMITED' "
+                    "UPDATE \"user\" SET is_licensed = TRUE, is_admin = TRUE, license_type = 'UNLIMITED' "
                     "WHERE LOWER(username) IN ('smq2458', 'admin')"
                 )
             )
@@ -736,6 +808,15 @@ def _prepare_request():
         except Exception:
             pass
 
+    # محافظت CSRF: چون کوکی‌ها SameSite=None هستند (برای iframe/PWA)،
+    # درخواست‌های تغییردهنده با Origin متفاوت از هاست رد می‌شوند.
+    if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+        origin = request.headers.get("Origin")
+        if origin:
+            origin_host = urlparse(origin).netloc.split("@")[-1]
+            if origin_host and origin_host != request.host:
+                return json_error("درخواست از مبدأ نامعتبر است (CSRF).", 403)
+
     if not current_user.is_authenticated:
         token = request.cookies.get(AUTH_COOKIE) or request.args.get("auth") or request.form.get("auth")
         user = user_from_auth_token(token)
@@ -754,7 +835,71 @@ def _prepare_request():
     if request.endpoint in allowed or request.endpoint is None:
         return
     if not current_user.is_authenticated:
+        # برای درخواست‌های AJAX/API ریدایرکت به لاگین بی‌معنی است؛ 401 برگردان
+        # تا کلاینت پیام درست نشان بدهد و کاربر را به ورود ببرد.
+        if wants_json() or request.path.startswith("/api/"):
+            return json_error("نشست شما منقضی شده است؛ دوباره وارد شوید.", 401)
         return redirect(url_for("login"))
+
+
+def _prefers_json():
+    return (
+        wants_json()
+        or request.path.startswith("/api/")
+        or "application/json" in (request.headers.get("Accept") or "")
+    )
+
+
+def _error_page(title, subtitle):
+    return (
+        "<!DOCTYPE html><html dir=\"rtl\" lang=\"fa\"><head><meta charset=\"UTF-8\">"
+        f"<title>{title} · لیستیا</title>"
+        "<style>body{font-family:Vazirmatn,Tahoma,sans-serif;background:#F3F6F8;"
+        "display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0}"
+        ".box{background:#fff;border-radius:14px;padding:30px 36px;text-align:center;"
+        "box-shadow:0 10px 30px rgba(20,36,48,.12);max-width:360px}"
+        "h1{font-size:20px;margin:0 0 8px;color:#142430}"
+        "p{font-size:13px;color:#5A6B78;margin:0 0 14px;line-height:1.8}"
+        "a{color:#2F6F76;font-weight:700;text-decoration:none}</style></head>"
+        f"<body><div class=\"box\"><h1>{title}</h1><p>{subtitle}</p>"
+        "<a href=\"/\">بازگشت به داشبورد</a></div></body></html>"
+    )
+
+
+@app.errorhandler(404)
+def error_not_found(error):
+    if _prefers_json():
+        return json_error("مورد نظر پیدا نشد.", 404)
+    return _error_page("صفحه پیدا نشد", "آدرس مورد نظر وجود ندارد یا حذف شده است."), 404
+
+
+@app.errorhandler(405)
+def error_method_not_allowed(error):
+    if _prefers_json():
+        return json_error("این متد برای مسیر درخواستی مجاز نیست.", 405)
+    return _error_page("متد مجاز نیست", "روش ارسال درخواست برای این مسیر معتبر نیست."), 405
+
+
+@app.errorhandler(413)
+def error_too_large(error):
+    msg = "حجم فایل بیش از حد مجاز است (حداکثر ۸ مگابایت)."
+    if _prefers_json():
+        return json_error(msg, 413)
+    return _error_page("فایل خیلی بزرگ است", msg), 413
+
+
+@app.errorhandler(500)
+def error_internal(error):
+    # رول‌بک حیاتی است؛ در PostgreSQL یک تراکنش شکست‌خورده بدون رول‌بک
+    # می‌تواند نشست دیتابیس را تا پایان درخواست خراب نگه دارد.
+    try:
+        db.session.rollback()
+    except Exception:
+        pass
+    app.logger.exception("خطای داخلی سرور: %s", error)
+    if _prefers_json():
+        return json_error("خطای داخلی سرور رخ داد؛ لطفاً دوباره تلاش کنید.", 500)
+    return _error_page("خطای موقت سرور", "مشکلی در سرور رخ داد. چند لحظه بعد دوباره امتحان کنید."), 500
 
 
 # ---------------------------------------------------------------------------
@@ -856,24 +1001,37 @@ def login():
         return redirect("/")
 
     if request.method == "POST":
-        ip = request.headers.get("X-Forwarded-For", request.remote_addr or "?").split(",")[0].strip()
-        if login_is_throttled(ip):
+        ip = _request_ip()
+        if is_throttled("login", ip):
             return render_template("login.html", mode="login", error="تلاش‌های ورود زیاد است. چند دقیقه بعد دوباره امتحان کنید.")
         username = request.form.get("username", "").strip()[:100]
         password = request.form.get("password", "")
         user = User.query.filter_by(username=username).first()
         if user and check_password_hash(user.password_hash, password):
-            _login_attempts.pop(ip, None)
+            clear_attempts("login", ip)
             if user.username.lower() in ADMIN_USERNAMES:
                 user.is_admin = True
                 user.is_licensed = True
                 user.license_type = "UNLIMITED"
                 db.session.commit()
             return login_handoff(user)
-        record_login_fail(ip)
+        record_attempt("login", ip)
         return render_template("login.html", mode="login", error="نام کاربری یا رمز عبور اشتباه است.")
 
     return render_template("login.html", mode="login", error=None)
+
+
+def _username_taken(username):
+    """بررسی یکتایی نام کاربری بدون توجه به کوچک/بزرگ حروف.
+
+    حیاتی برای امنیت: در PostgreSQL تطابق آیدی case-sensitive است و بدون این
+    بررسی، ثبت «SMQ2458» یک حساب تازه می‌ساخت که به‌خاطر تطابق غیرحساس به
+    حروف در is_admin_user، دسترسی مدیر می‌گرفت.
+    """
+    return (
+        User.query.filter(db.func.lower(User.username) == username.lower()).first()
+        is not None
+    )
 
 
 @app.route("/signup", methods=["GET", "POST"])
@@ -882,9 +1040,29 @@ def signup():
         return redirect("/")
 
     if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "")
+        ip = _request_ip()
+        if is_throttled("signup", ip, limit=10):
+            return render_template(
+                "login.html", mode="signup",
+                error="ثبت‌نام‌های پشت سر هم زیاد است. چند دقیقه بعد دوباره امتحان کنید.",
+            )
+        record_attempt("signup", ip)
 
+        username = request.form.get("username", "").strip()[:100]
+        password = request.form.get("password", "")
+        first_name = clean_person_name(request.form.get("first_name", ""))
+        last_name = clean_person_name(request.form.get("last_name", ""))
+        phone = normalize_phone(request.form.get("phone", ""))
+
+        if not first_name or not last_name:
+            return render_template(
+                "login.html", mode="signup", error="نام و نام خانوادگی را وارد کنید."
+            )
+        if not phone:
+            return render_template(
+                "login.html", mode="signup",
+                error="شماره موبایل معتبر وارد کنید (مثل 09123456789).",
+            )
         if not username or not password:
             return render_template(
                 "login.html", mode="signup", error="نام کاربری و رمز عبور الزامی است."
@@ -893,11 +1071,11 @@ def signup():
             return render_template(
                 "login.html", mode="signup", error="نام کاربری خیلی کوتاه است."
             )
-        if len(password) < 4:
+        if len(password) < 6:
             return render_template(
-                "login.html", mode="signup", error="رمز عبور حداقل ۴ کاراکتر باشد."
+                "login.html", mode="signup", error="رمز عبور حداقل ۶ کاراکتر باشد."
             )
-        if User.query.filter_by(username=username).first():
+        if _username_taken(username):
             return render_template(
                 "login.html", mode="signup", error="این نام کاربری قبلاً وجود دارد."
             )
@@ -906,6 +1084,9 @@ def signup():
         user = User(
             username=username,
             password_hash=generate_password_hash(password),
+            first_name=first_name,
+            last_name=last_name,
+            phone=phone,
             is_licensed=is_admin_account,
             license_type="UNLIMITED" if is_admin_account else "free",
             is_admin=is_admin_account,
@@ -1114,7 +1295,10 @@ def delete_archive_group(supplier_id, date_str):
             ordered_date=None,
         ).all()
     else:
-        target_date = date.fromisoformat(date_str)
+        try:
+            target_date = date.fromisoformat(date_str)
+        except ValueError:
+            return json_error("تاریخ نامعتبر است.")
         products_to_delete = Product.query.filter_by(
             owner_id=current_user.id,
             supplier_id=supplier_id,
@@ -1652,12 +1836,21 @@ def activate_license():
 #  پنل ادمین: تولید لایسنس داخل وب‌اپلیکیشن (مخصوص س.م.قتالی smq2458)
 # ---------------------------------------------------------------------------
 
-def admin_user_payload(user):
-    """اطلاعات یک کاربر برای جدول مدیریت (پنل مدیر)."""
-    user_limits = get_user_limits(user)
+def admin_user_payload(user, s_count=None, p_count=None):
+    """اطلاعات یک کاربر برای جدول مدیریت (پنل مدیر).
+
+    شمارش تأمین‌کننده/محصول را می‌توان از بیرون پاس داد تا در لیست کاربران
+    به‌جای دو کوئری COUNT به‌ازای هر کاربر، فقط دو کوئری GROUP BY اجرا شود.
+    """
+    user_limits = get_user_limits(user, s_count, p_count)
+    full_name = f"{user.first_name or ''} {user.last_name or ''}".strip()
     return {
         "id": user.id,
         "username": user.username,
+        "first_name": user.first_name or "",
+        "last_name": user.last_name or "",
+        "full_name": full_name,
+        "phone": user.phone or "",
         "user_code": user_limits["user_code"],
         "is_licensed": user_limits["is_licensed"],
         "is_expired": user_limits["is_expired"],
@@ -1704,12 +1897,29 @@ def admin_license_generator():
         return json_error("دسترسی به این بخش فقط برای مدیر نرم‌افزار مجاز است.", 403)
 
     all_users = User.query.order_by(User.id.desc()).all()
-    return render_template("admin_license.html", users=[admin_user_payload(u) for u in all_users])
+    # شمارش یک‌جا به‌جای دو کوئری COUNT به‌ازای هر کاربر (جلوگیری از N+1)
+    supplier_counts = dict(
+        db.session.query(Supplier.owner_id, db.func.count(Supplier.id))
+        .group_by(Supplier.owner_id)
+        .all()
+    )
+    product_counts = dict(
+        db.session.query(Product.owner_id, db.func.count(Product.id))
+        .group_by(Product.owner_id)
+        .all()
+    )
+    return render_template(
+        "admin_license.html",
+        users=[
+            admin_user_payload(u, supplier_counts.get(u.id, 0), product_counts.get(u.id, 0))
+            for u in all_users
+        ],
+    )
 
 
 @app.route("/api/admin/users/<int:user_id>/update", methods=["POST"])
 def api_admin_update_user(user_id):
-    """ویرایش کاربر توسط مدیر: نام کاربری، رمز عبور و دسترسی مدیریت."""
+    """ویرایش کاربر توسط مدیر: نام کاربری، مشخصات (نام/موبایل)، رمز و دسترسی."""
     user, error = admin_target_user(user_id)
     if error:
         return error
@@ -1728,15 +1938,37 @@ def api_admin_update_user(user_id):
         ).first()
         if exists:
             return json_error("این نام کاربری قبلاً وجود دارد.")
+        # نام‌های رزروشده مدیر نباید به حساب دیگری داده شوند
+        if username.lower() in ADMIN_USERNAMES:
+            return json_error("این نام کاربری رزرو شده است و قابل انتساب نیست.")
         old_username = user.username
         user.username = username
         # کلید لایسنس به نام کاربری گره خورده؛ با تغییر نام، کلید تازه صادر می‌شود.
         refresh_license_key(user)
         changes.append(f"نام کاربری از «{old_username}» به «{username}» تغییر کرد")
 
+    # مشخصات کاربر: فقط وقتی فیلدها در فرم آمده‌اند (پنل مدیر همیشه می‌فرستد)
+    if any(k in request.form for k in ("first_name", "last_name", "phone")):
+        first_name = clean_person_name(request.form.get("first_name", ""))
+        last_name = clean_person_name(request.form.get("last_name", ""))
+        phone = normalize_phone(request.form.get("phone", ""))
+        if not first_name or not last_name:
+            return json_error("نام و نام خانوادگی را کامل وارد کنید.")
+        if not phone:
+            return json_error("شماره موبایل معتبر وارد کنید (مثل 09123456789).")
+        if (
+            user.first_name != first_name
+            or user.last_name != last_name
+            or (user.phone or "") != phone
+        ):
+            user.first_name = first_name
+            user.last_name = last_name
+            user.phone = phone
+            changes.append("مشخصات (نام و موبایل) به‌روز شد")
+
     if new_password:
-        if len(new_password) < 4:
-            return json_error("رمز عبور جدید حداقل ۴ کاراکتر باشد.")
+        if len(new_password) < 6:
+            return json_error("رمز عبور جدید حداقل ۶ کاراکتر باشد.")
         user.password_hash = generate_password_hash(new_password)
         changes.append("رمز عبور بازنشانی شد")
 
@@ -1920,6 +2152,31 @@ def account():
     )
 
 
+@app.route("/account/profile", methods=["POST"])
+def update_profile():
+    """ویرایش نام، نام خانوادگی و شماره موبایل خود کاربر."""
+    user = db.session.get(User, current_user.id)
+    first_name = clean_person_name(request.form.get("first_name", ""))
+    last_name = clean_person_name(request.form.get("last_name", ""))
+    phone = normalize_phone(request.form.get("phone", ""))
+
+    if not first_name or not last_name:
+        return json_error("نام و نام خانوادگی را کامل وارد کنید.")
+    if not phone:
+        return json_error("شماره موبایل معتبر وارد کنید (مثل 09123456789).")
+
+    user.first_name = first_name
+    user.last_name = last_name
+    user.phone = phone
+    db.session.commit()
+    return {
+        "success": True,
+        "message": "✓ مشخصات ذخیره شد.",
+        "full_name": f"{first_name} {last_name}".strip(),
+        "phone": phone,
+    }
+
+
 @app.route("/account/username", methods=["POST"])
 def change_username():
     """تغییر نام کاربری فقط از پنل مدیر انجام می‌شود."""
@@ -1939,8 +2196,8 @@ def change_password():
 
     if not check_password_hash(user.password_hash, current_password):
         return json_error("رمز عبور فعلی درست نیست.")
-    if len(new_password) < 4:
-        return json_error("رمز عبور جدید حداقل ۴ کاراکتر باشد.")
+    if len(new_password) < 6:
+        return json_error("رمز عبور جدید حداقل ۶ کاراکتر باشد.")
     if new_password != confirm_password:
         return json_error("تکرار رمز عبور جدید یکسان نیست.")
     if check_password_hash(user.password_hash, new_password):

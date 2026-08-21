@@ -20,12 +20,18 @@
 
   <div class="card card-pad" style="margin-bottom:22px;">
     <div class="account-head">
-      <div class="account-avatar">{{ current_user.username[:1]|upper }}</div>
+      <div class="account-avatar">{{ ((current_user.first_name or current_user.username)[:1])|upper }}</div>
       <div>
         <div class="account-name" id="account-username">
-          {{ current_user.username }}
+          {{ ((current_user.first_name or '') ~ ' ' ~ (current_user.last_name or ''))|trim or current_user.username }}
           {% if is_admin %}
             <span class="tag tag-accent" style="margin-right:6px; font-size:11px;">👑 حساب مدیر و توسعه‌دهنده</span>
+          {% endif %}
+        </div>
+        <div class="page-sub" style="margin-top:2px;">
+          {{ current_user.username }}
+          {% if current_user.phone %}
+            · <span class="mono" dir="ltr">{{ current_user.phone }}</span>
           {% endif %}
         </div>
         <div class="page-sub" style="margin-top:2px;">
@@ -150,11 +156,22 @@
   </div>
 
   <div class="card card-pad" style="margin-bottom:22px;">
+    <h3 class="account-section-title">مشخصات کاربری</h3>
+    <div class="page-sub" style="margin-bottom:12px;">این اطلاعات برای صدور لایسنس و پشتیبانی استفاده می‌شود.</div>
+    <form id="profile-form" class="field-row" style="flex-wrap:wrap;">
+      <input id="profile-first-name" class="field" style="width:150px" value="{{ current_user.first_name or '' }}" placeholder="نام" autocomplete="given-name" maxlength="100" required>
+      <input id="profile-last-name" class="field" style="width:170px" value="{{ current_user.last_name or '' }}" placeholder="نام خانوادگی" autocomplete="family-name" maxlength="100" required>
+      <input id="profile-phone" class="field mono" dir="ltr" style="width:150px; text-align:left;" value="{{ current_user.phone or '' }}" placeholder="09123456789" autocomplete="tel" maxlength="20" required>
+      <button id="profile-btn" type="submit" class="btn btn-accent">ذخیره مشخصات</button>
+    </form>
+  </div>
+
+  <div class="card card-pad" style="margin-bottom:22px;">
     <h3 class="account-section-title">تغییر رمز عبور</h3>
     <form id="password-form" class="field-row">
       <input id="current-password" class="field" style="width:170px" type="password" placeholder="رمز عبور فعلی" autocomplete="current-password" required>
-      <input id="new-password" class="field" style="width:170px" type="password" placeholder="رمز جدید" autocomplete="new-password" required>
-      <input id="confirm-password" class="field" style="width:170px" type="password" placeholder="تکرار رمز جدید" autocomplete="new-password" required>
+      <input id="new-password" class="field" style="width:170px" type="password" placeholder="رمز جدید (حداقل ۶ کاراکتر)" autocomplete="new-password" minlength="6" required>
+      <input id="confirm-password" class="field" style="width:170px" type="password" placeholder="تکرار رمز جدید" autocomplete="new-password" minlength="6" required>
       <button id="password-btn" type="submit" class="btn btn-accent">ذخیره رمز عبور</button>
     </form>
   </div>
@@ -250,6 +267,23 @@
     function copyUserCodeField() {
       copyField("account-user-code", "شناسه فعال‌سازی کپی شد");
     }
+
+    document.getElementById("profile-form").addEventListener("submit", function (e) {
+      e.preventDefault();
+      const firstName = document.getElementById("profile-first-name").value.trim();
+      const lastName = document.getElementById("profile-last-name").value.trim();
+      const phone = document.getElementById("profile-phone").value.trim();
+      if (!firstName || !lastName || !phone) {
+        showError("نام، نام خانوادگی و شماره موبایل را کامل وارد کنید.");
+        return;
+      }
+      post("/account/profile",
+        { first_name: firstName, last_name: lastName, phone: phone },
+        document.getElementById("profile-btn"), function () {
+          showSuccess("مشخصات ذخیره شد");
+          setTimeout(function () { window.location.reload(); }, 900);
+        });
+    });
 
     document.getElementById("password-form").addEventListener("submit", function (e) {
       e.preventDefault();

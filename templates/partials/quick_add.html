@@ -13,11 +13,7 @@
     <div class="quick-title">
       <span class="quick-dot"></span>
       ثبت سریع در لیستیا
-      {% if limits and not limits.is_licensed %}
-        <span class="quota-pill {{ 'quota-pill-full' if not limits.can_add_product else '' }}">
-          {{ limits.product_count }}/5 کالا
-        </span>
-      {% endif %}
+      {# شمارنده سهمیه کالا به سایدبار منتقل شد و به‌صورت زنده به‌روز می‌شود #}
     </div>
 
     <div class="quick-hint">
@@ -32,8 +28,9 @@
     </div>
   </div>
 
-  {% if limits and not limits.can_add_product %}
-    <div class="license-lock-banner">
+  {% if limits and not limits.is_licensed %}
+    {# همیشه رندر می‌شود تا با رسیدن به سقف، بدون رفرش صفحه نمایش داده شود #}
+    <div class="license-lock-banner" id="qa-lock-banner"{% if limits.can_add_product %} hidden{% endif %}>
       <div class="license-lock-icon">🔒</div>
       <div class="license-lock-content">
         <div class="license-lock-title">سقف ۵ محصول در نسخه آزمایشی تکمیل است</div>
