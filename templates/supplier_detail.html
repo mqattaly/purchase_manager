@@ -44,12 +44,12 @@
           <td class="cell-unit"><span class="tag">{{ item.unit }}</span></td>
           <td class="cell-description">{{ item.description }}</td>
           <td>
-            <button type="button" class="icon-btn" title="ویرایش" onclick="startEdit({{ item.id }})">
+            <button type="button" class="icon-btn" title="ویرایش" aria-label="ویرایش" onclick="startEdit({{ item.id }})">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
             </button>
           </td>
           <td>
-            <button type="button" class="icon-btn danger" title="حذف" onclick="deleteProduct({{ item.id }})">
+            <button type="button" class="icon-btn danger" title="حذف" aria-label="حذف" onclick="deleteProduct({{ item.id }})">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>
             </button>
           </td>
@@ -107,7 +107,7 @@
                 <td class="cell-unit"><span class="tag tag-success">{{ item.unit }}</span></td>
                 <td class="cell-description">{{ item.description }}</td>
                 <td>
-                  <button type="button" class="icon-btn danger" title="حذف" onclick="deleteProduct({{ item.id }})">
+                  <button type="button" class="icon-btn danger" title="حذف" aria-label="حذف" onclick="deleteProduct({{ item.id }})">
                     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>
                   </button>
                 </td>
@@ -219,9 +219,9 @@
         '<td class="mono cell-quantity">' + escapeHtml(item.quantity) + "</td>" +
         '<td class="cell-unit"><span class="tag">' + escapeHtml(item.unit) + "</span></td>" +
         '<td class="cell-description">' + escapeHtml(item.description || "") + "</td>" +
-        '<td><button type="button" class="icon-btn" title="ویرایش" onclick="startEdit(' + item.id + ')">' +
+        '<td><button type="button" class="icon-btn" title="ویرایش" aria-label="ویرایش" onclick="startEdit(' + item.id + ')">' +
           '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button></td>' +
-        '<td><button type="button" class="icon-btn danger" title="حذف" onclick="deleteProduct(' + item.id + ')">' +
+        '<td><button type="button" class="icon-btn danger" title="حذف" aria-label="حذف" onclick="deleteProduct(' + item.id + ')">' +
           '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button></td>'
       );
     }
@@ -233,7 +233,7 @@
         '<td class="mono cell-quantity">' + escapeHtml(item.quantity) + "</td>" +
         '<td class="cell-unit"><span class="tag tag-success">' + escapeHtml(item.unit) + "</span></td>" +
         '<td class="cell-description">' + escapeHtml(item.description || "") + "</td>" +
-        '<td><button type="button" class="icon-btn danger" title="حذف" onclick="deleteProduct(' + item.id + ')">' +
+        '<td><button type="button" class="icon-btn danger" title="حذف" aria-label="حذف" onclick="deleteProduct(' + item.id + ')">' +
           '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button></td>'
       );
     }
@@ -413,7 +413,7 @@
           '<input class="field" style="height:34px; width:150px;" value="' + escapeAttr(item.product_name) + '">' +
         '</div>';
 
-      row.querySelector(".cell-quantity").innerHTML = '<input class="field mono" style="height:34px; width:75px;" type="number" value="' + escapeAttr(item.quantity) + '">';
+      row.querySelector(".cell-quantity").innerHTML = '<input class="field mono" style="height:34px; width:75px;" type="number" min="0.001" max="999999999" step="0.001" value="' + escapeAttr(item.quantity) + '">';
       row.querySelector(".cell-unit").innerHTML =
         '<select class="field" style="height:34px; width:95px;">' +
         UNITS.map(function (u) {

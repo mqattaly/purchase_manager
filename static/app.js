@@ -69,7 +69,7 @@
 
   /** fetch + JSON in one step: always resolves to { ok, status, data }. */
   function request(url, options) {
-    const opts = Object.assign({ method: "GET" }, options || {});
+    const opts = Object.assign({ method: "GET", credentials: "same-origin" }, options || {});
     opts.headers = Object.assign({ "X-Requested-With": "fetch" }, opts.headers || {});
 
     if (opts.form) {
@@ -79,12 +79,11 @@
       delete opts.form;
     }
 
-    try {
-      const token = window.localStorage.getItem("listia_auth");
-      if (token && String(url).indexOf("auth=") < 0) {
-        url += (String(url).indexOf("?") >= 0 ? "&" : "?") + "auth=" + encodeURIComponent(token);
-      }
-    } catch (err) {}
+    const method = String(opts.method || "GET").toUpperCase();
+    if (!["GET", "HEAD", "OPTIONS"].includes(method)) {
+      const csrf = document.querySelector('meta[name="csrf-token"]');
+      if (csrf && csrf.content) opts.headers["X-CSRF-Token"] = csrf.content;
+    }
 
     return fetch(url, opts).then(function (res) {
       return res
@@ -1777,9 +1776,12 @@
 
   /* ========================================================= License UI */
 
+  let licenseReturnFocus = null;
+
   function openLicenseModal() {
     const modal = document.getElementById("license-modal");
     if (!modal) return;
+    licenseReturnFocus = document.activeElement;
     modal.hidden = false;
     modal.classList.add("modal-open");
     const input = document.getElementById("modal-license-key");
@@ -1797,6 +1799,10 @@
     if (errBox) errBox.style.display = "none";
     const succBox = document.getElementById("modal-license-success");
     if (succBox) succBox.style.display = "none";
+    if (licenseReturnFocus && typeof licenseReturnFocus.focus === "function") {
+      licenseReturnFocus.focus();
+    }
+    licenseReturnFocus = null;
   }
 
   function copyUserCode() {
@@ -1867,6 +1873,25 @@
       if (modal && !modal.hidden) {
         closeLicenseModal();
       }
+      return;
+    }
+
+    if (e.key !== "Tab") return;
+    const visibleModals = Array.from(document.querySelectorAll(".modal-backdrop:not([hidden])"));
+    const modal = visibleModals[visibleModals.length - 1];
+    if (!modal) return;
+    const focusable = Array.from(modal.querySelectorAll(
+      'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])'
+    )).filter(function (item) { return item.getClientRects().length > 0; });
+    if (!focusable.length) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
     }
   });
 
@@ -1897,17 +1922,13 @@
     },
 
     quotaElement(kind) {
-      return (
-        document.getElementById("sidebar-" + kind + "-count") ||
-        document.getElementById("modal-" + kind + "-count")
-      );
+      return document.querySelector('[data-quota-kind="' + kind + '"]');
     },
 
     setQuota(kind, value, maxValue) {
       const count = Math.max(0, parseInt(value, 10) || 0);
-      ["sidebar-", "modal-"].forEach(function (prefix) {
-        const el = document.getElementById(prefix + kind + "-count");
-        if (el) el.textContent = count;
+      document.querySelectorAll('[data-quota-kind="' + kind + '"]').forEach(function (el) {
+        el.textContent = count;
       });
 
       if (QuickAdd.root) {
@@ -1915,9 +1936,10 @@
       }
 
       if (kind === "product") {
-        const progress = document.getElementById("sidebar-product-progress");
         const max = Math.max(1, parseInt(maxValue, 10) || 5);
-        if (progress) progress.style.width = Math.min(100, (count / max) * 100) + "%";
+        document.querySelectorAll('[data-quota-progress="product"]').forEach(function (progress) {
+          progress.style.width = Math.min(100, (count / max) * 100) + "%";
+        });
       }
       return count;
     },
@@ -1996,9 +2018,7 @@
      */
     refresh() {
       const hasDashboard = document.getElementById("dash-supplier-grid");
-      const hasLiveQuota =
-        document.getElementById("sidebar-product-count") ||
-        document.getElementById("sidebar-supplier-count");
+      const hasLiveQuota = document.querySelector("[data-quota-kind]");
       if (!hasDashboard && !hasLiveQuota) return Promise.resolve(null);
       return request("/api/dashboard/stats", { cache: "no-store" })
         .then(function (result) {

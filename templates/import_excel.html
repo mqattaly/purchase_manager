@@ -44,8 +44,9 @@
 
   <div class="card card-pad" style="max-width:560px;">
     <form method="POST" action="/import" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div class="field-label">انتخاب فایل اکسل یا CSV:</div>
-      <input type="file" name="file" accept=".xlsx,.xls,.csv" class="field" style="padding-top:8px;" required>
+      <input type="file" name="file" accept=".xlsx,.csv" class="field" style="padding-top:8px;" required>
 
       <div style="margin-top:16px; display:flex; gap:10px; align-items:center;">
         <button type="submit" class="btn btn-primary">آپلود و ایمپورت داده‌ها</button>

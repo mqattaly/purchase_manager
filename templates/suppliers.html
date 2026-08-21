@@ -58,10 +58,10 @@
       {% for supplier in suppliers %}
         <div class="supplier-row" data-supplier-id="{{ supplier.id }}" data-name="{{ supplier.name }}" style="{{ 'border-bottom:1px solid var(--border-soft);' if not loop.last }}">
           <a href="/supplier/{{ supplier.id }}" class="supplier-name">{{ supplier.name }}</a>
-          <button type="button" class="icon-btn" title="ویرایش" onclick="startEditSupplier({{ supplier.id }})">
+          <button type="button" class="icon-btn" title="ویرایش" aria-label="ویرایش" onclick="startEditSupplier({{ supplier.id }})">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
           </button>
-          <button type="button" class="icon-btn danger" title="حذف" onclick="deleteSupplier({{ supplier.id }})">
+          <button type="button" class="icon-btn danger" title="حذف" aria-label="حذف" onclick="deleteSupplier({{ supplier.id }})">
             <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg>
           </button>
         </div>
@@ -130,9 +130,9 @@
     function rowHtml(id, name) {
       return (
         '<a href="/supplier/' + id + '" class="supplier-name">' + escapeHtml(name) + "</a>" +
-        '<button type="button" class="icon-btn" title="ویرایش" onclick="startEditSupplier(' + id + ')">' +
+        '<button type="button" class="icon-btn" title="ویرایش" aria-label="ویرایش" onclick="startEditSupplier(' + id + ')">' +
           '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>' +
-        '<button type="button" class="icon-btn danger" title="حذف" onclick="deleteSupplier(' + id + ')">' +
+        '<button type="button" class="icon-btn danger" title="حذف" aria-label="حذف" onclick="deleteSupplier(' + id + ')">' +
           '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/></svg></button>'
       );
     }
@@ -187,9 +187,9 @@
       const name = row.dataset.name || "";
       row.innerHTML =
         '<input class="field supplier-edit-input" style="flex:1; height:34px;" value="' + escapeAttr(name) + '">' +
-        '<button type="button" class="icon-btn" title="ذخیره" onclick="saveSupplier(' + id + ')">' +
+        '<button type="button" class="icon-btn" title="ذخیره" aria-label="ذخیره" onclick="saveSupplier(' + id + ')">' +
           '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></button>' +
-        '<button type="button" class="icon-btn" title="لغو" onclick="cancelSupplierEdit(' + id + ')">✕</button>';
+        '<button type="button" class="icon-btn" title="لغو" aria-label="لغو" onclick="cancelSupplierEdit(' + id + ')">✕</button>';
       const input = row.querySelector("input");
       input.focus();
       input.select();

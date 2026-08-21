@@ -48,7 +48,7 @@
 
         <div id="custom-days-wrap" style="width:110px; display:none;">
           <label class="field-label" for="gen-custom-days">تعداد روز:</label>
-          <input id="gen-custom-days" class="field mono" type="number" min="1" placeholder="مثلاً 14" value="14">
+          <input id="gen-custom-days" class="field mono" type="number" min="1" max="3650" placeholder="مثلاً 14" value="14">
         </div>
 
         <div style="width:140px;">
@@ -168,12 +168,12 @@
 
   <!-- ویرایش کاربر -->
   <div id="user-editor-modal" class="modal-backdrop" hidden>
-    <div class="modal-card">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="user-editor-title">
       <div class="modal-head">
         <div class="modal-title-group">
           <span class="modal-icon">✏️</span>
           <div>
-            <h2 class="modal-title">ویرایش کاربر</h2>
+            <h2 id="user-editor-title" class="modal-title">ویرایش کاربر</h2>
             <div class="modal-sub" id="user-editor-sub"></div>
           </div>
         </div>
@@ -207,7 +207,7 @@
 
         <div class="field-group" style="margin-top:14px;">
           <label class="field-label" for="edit-password">رمز عبور جدید (خالی بگذارید تا تغییر نکند)</label>
-          <input id="edit-password" class="field" type="text" autocomplete="off" placeholder="حداقل ۴ کاراکتر">
+          <input id="edit-password" class="field" type="password" minlength="8" maxlength="128" autocomplete="new-password" placeholder="حداقل ۸ کاراکتر">
         </div>
 
         <label id="edit-admin-wrap" style="display:flex; align-items:center; gap:8px; margin-top:14px; font-size:13px; font-weight:600; cursor:pointer;">
@@ -225,12 +225,12 @@
 
   <!-- ویرایش لایسنس -->
   <div id="license-editor-modal" class="modal-backdrop" hidden>
-    <div class="modal-card">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="license-editor-title">
       <div class="modal-head">
         <div class="modal-title-group">
           <span class="modal-icon">🎫</span>
           <div>
-            <h2 class="modal-title">ویرایش لایسنس کاربر</h2>
+            <h2 id="license-editor-title" class="modal-title">ویرایش لایسنس کاربر</h2>
             <div class="modal-sub" id="license-editor-sub"></div>
           </div>
         </div>
@@ -254,7 +254,7 @@
 
           <div id="edit-custom-days-wrap" style="width:120px; display:none;">
             <label class="field-label" for="edit-custom-days">تعداد روز</label>
-            <input id="edit-custom-days" class="field mono" type="number" min="1" value="30">
+            <input id="edit-custom-days" class="field mono" type="number" min="1" max="3650" value="30">
           </div>
 
           <div id="edit-expires-wrap" style="width:170px; display:none;">
@@ -328,7 +328,11 @@
       let duration = document.getElementById("gen-duration").value;
       if (duration === "CUSTOM") {
         const days = document.getElementById("gen-custom-days").value.trim();
-        duration = (days && Number(days) > 0) ? days + "D" : "LIFE";
+        if (!days || Number(days) < 1 || Number(days) > 3650) {
+          showError("تعداد روز باید بین ۱ و ۳۶۵۰ باشد.");
+          return;
+        }
+        duration = days + "D";
       }
 
       const btn = document.getElementById("gen-btn");
@@ -398,12 +402,21 @@
 
     function openAdminModal(id) {
       const modal = document.getElementById(id);
-      if (modal) modal.hidden = false;
+      if (!modal) return;
+      modal._returnFocus = document.activeElement;
+      modal.hidden = false;
+      const first = modal.querySelector("input:not([disabled]), select:not([disabled]), button:not([disabled])");
+      if (first) setTimeout(function () { first.focus(); }, 0);
     }
 
     function closeAdminModal(id) {
       const modal = document.getElementById(id);
-      if (modal) modal.hidden = true;
+      if (!modal || modal.hidden) return;
+      modal.hidden = true;
+      if (modal._returnFocus && typeof modal._returnFocus.focus === "function") {
+        modal._returnFocus.focus();
+      }
+      modal._returnFocus = null;
     }
 
     function openUserEditor(id) {
@@ -515,8 +528,8 @@
         form.expires_at = expires;
       } else if (mode === "CUSTOM") {
         const days = document.getElementById("edit-custom-days").value.trim();
-        if (!days || Number(days) <= 0) {
-          showError("تعداد روز معتبر وارد کنید.");
+        if (!days || Number(days) < 1 || Number(days) > 3650) {
+          showError("تعداد روز باید بین ۱ و ۳۶۵۰ باشد.");
           return;
         }
         form.duration = days + "D";

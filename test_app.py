@@ -1,21 +1,33 @@
-import io
 import os
+import re
 import unittest
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 # Tests must never connect to the deployed PostgreSQL database or mutate the
 # tracked local sample database.
 os.environ["DATABASE_URL"] = "sqlite:///:memory:"
 
-import pandas as pd
-from werkzeug.security import check_password_hash
-from app import app, db, User, Supplier, Product, get_user_limits, issue_api_token, is_admin_user
-from licensing import get_user_code, generate_key, generate_master_key, verify_key
+from sqlalchemy import event
+from werkzeug.security import check_password_hash, generate_password_hash
+
+from app import (
+    Product,
+    Supplier,
+    User,
+    app,
+    db,
+    get_user_limits,
+    is_admin_user,
+    issue_api_token,
+)
+from licensing import generate_key, verify_key
 
 
 class ListiaTestCase(unittest.TestCase):
     def setUp(self):
         app.config["TESTING"] = True
+        app.config["CSRF_PROTECT"] = False
+        app.config["RATE_LIMITING"] = False
         app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///:memory:"
         self.client = app.test_client()
         with app.app_context():
@@ -51,6 +63,39 @@ class ListiaTestCase(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         return res
 
+    def create_admin_and_login(self):
+        with app.app_context():
+            admin = User.query.filter_by(username="smq2458").first()
+            if not admin:
+                admin = User(
+                    username="smq2458",
+                    password_hash=generate_password_hash("adminpassword"),
+                    first_name="مدیر",
+                    last_name="سیستم",
+                    mobile="09120000000",
+                    is_admin=True,
+                    is_licensed=True,
+                    license_type="UNLIMITED",
+                )
+                db.session.add(admin)
+                db.session.commit()
+        response = self.client.post(
+            "/login",
+            data={"username": "smq2458", "password": "adminpassword"},
+            follow_redirects=True,
+        )
+        self.assertEqual(response.status_code, 200)
+        return response
+
+    @staticmethod
+    def csrf_from(response):
+        match = re.search(r'name="csrf-token" content="([^"]+)"', response.get_data(as_text=True))
+        if not match:
+            match = re.search(r'name="csrf_token" value="([^"]+)"', response.get_data(as_text=True))
+        if not match:
+            raise AssertionError("CSRF token was not rendered")
+        return match.group(1)
+
     def test_signup_saves_profile_and_validates_mobile(self):
         page = self.client.get("/signup")
         html = page.get_data(as_text=True)
@@ -65,7 +110,7 @@ class ListiaTestCase(unittest.TestCase):
                 "last_name": "رضایی",
                 "mobile": "12345",
                 "username": "ali",
-                "password": "123456",
+                "password": "12345678",
             },
         )
         self.assertIn("شماره موبایل معتبر نیست", invalid.get_data(as_text=True))
@@ -74,7 +119,7 @@ class ListiaTestCase(unittest.TestCase):
 
         self.register_and_login(
             "ali",
-            "123456",
+            "12345678",
             first_name=" علی ",
             last_name=" رضايي ",
             mobile="+۹۸ ۹۱۲ ۱۲۳ ۴۵۶۷",
@@ -86,7 +131,7 @@ class ListiaTestCase(unittest.TestCase):
             self.assertEqual(user.mobile, "09121234567")
 
     def test_time_limited_and_lifetime_licenses(self):
-        self.register_and_login("morteza", "123456")
+        self.register_and_login("morteza", "12345678")
 
         # 1. Generate 30-day license for morteza
         key_30d = generate_key("morteza", "PRO", "30D")
@@ -98,6 +143,14 @@ class ListiaTestCase(unittest.TestCase):
         data = res.get_json()
         self.assertTrue(data["success"])
         self.assertIn("30 روز", data["message"])
+
+        replay = self.client.post(
+            "/account/license",
+            data={"license_key": key_30d},
+            headers={"X-Requested-With": "fetch"},
+        )
+        self.assertEqual(replay.status_code, 409)
+        self.assertIn("قبلاً", replay.get_json()["message"])
 
         with app.app_context():
             user = User.query.filter_by(username="morteza").first()
@@ -111,7 +164,7 @@ class ListiaTestCase(unittest.TestCase):
         # 3. Simulate expired license by setting expires_at to past
         with app.app_context():
             user = User.query.filter_by(username="morteza").first()
-            user.license_expires_at = datetime.now() - timedelta(days=1)
+            user.license_expires_at = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=1)
             db.session.commit()
 
             limits = get_user_limits(user)
@@ -135,7 +188,7 @@ class ListiaTestCase(unittest.TestCase):
             self.assertTrue(limits["is_lifetime"])
 
     def test_dashboard_and_product_editing_with_supplier_change(self):
-        self.register_and_login("smq2458", "adminpassword")
+        self.create_admin_and_login()
 
         # Add 2 suppliers
         res = self.client.post("/suppliers", data={"name": "تأمین کننده الف"}, headers={"X-Requested-With": "fetch"})
@@ -182,7 +235,7 @@ class ListiaTestCase(unittest.TestCase):
 
     def test_trial_sidebar_quota_and_new_product_delete(self):
         """Trial counts come from the live API and a just-saved row is deletable."""
-        self.register_and_login("trial-user", "123456")
+        self.register_and_login("trial-user", "12345678")
         supplier_res = self.client.post(
             "/suppliers",
             data={"name": "تأمین آزمایشی"},
@@ -203,8 +256,9 @@ class ListiaTestCase(unittest.TestCase):
         product_id = product_res.get_json()["product"]["id"]
 
         html = self.client.get("/").get_data(as_text=True)
-        self.assertIn('id="sidebar-supplier-count">1</b>/1', html)
-        self.assertIn('id="sidebar-product-count">1</b>/5', html)
+        self.assertIn('id="sidebar-supplier-count" data-quota-kind="supplier">1</b>/1', html)
+        self.assertIn('id="sidebar-product-count" data-quota-kind="product">1</b>/5', html)
+        self.assertIn('class="mobile-quota-bar"', html)
         self.assertNotIn('class="quota-pill', html)
 
         stats = self.client.get("/api/dashboard/stats").get_json()
@@ -264,7 +318,7 @@ class ListiaTestCase(unittest.TestCase):
 
     def test_supplier_card_counters_include_previous_products(self):
         """کارت تأمین‌کننده باید محصولات قبلی را هم بشمارد، نه فقط ثبت‌های جدید."""
-        self.register_and_login("smq2458", "adminpassword")
+        self.create_admin_and_login()
 
         res = self.client.post("/suppliers", data={"name": "تأمین کننده قدیمی"}, headers={"X-Requested-With": "fetch"})
         s_id = res.get_json()["id"]
@@ -326,7 +380,7 @@ class ListiaTestCase(unittest.TestCase):
 
     def test_purchases_sorted_by_supplier_then_entry_order(self):
         """لیست خریدها: اول گروه تأمین‌کننده، بعد ترتیب ورود محصول‌ها."""
-        self.register_and_login("smq2458", "adminpassword")
+        self.create_admin_and_login()
 
         ids = {}
         for name in ("ب تأمین دوم", "الف تأمین اول"):
@@ -363,7 +417,7 @@ class ListiaTestCase(unittest.TestCase):
     def test_admin_can_manage_users_and_licenses(self):
         """مدیر می‌تواند کاربر و لایسنس را ویرایش و حذف کند؛ کاربر عادی نه."""
         # یک کاربر عادی می‌سازیم
-        self.register_and_login("mohammad", "123456")
+        self.register_and_login("mohammad", "12345678")
         with app.app_context():
             target_id = User.query.filter_by(username="mohammad").first().id
         # کاربر عادی نباید به عملیات مدیریتی دسترسی داشته باشد
@@ -372,15 +426,15 @@ class ListiaTestCase(unittest.TestCase):
         self.assertEqual(res.status_code, 403)
         # کاربر عادی نباید بتواند نام کاربری خودش را عوض کند
         res = self.client.post("/account/username",
-                               data={"username": "newname", "current_password": "123456"},
+                               data={"username": "newname", "current_password": "12345678"},
                                headers={"X-Requested-With": "fetch"})
         self.assertEqual(res.status_code, 403)
         with app.app_context():
             self.assertIsNotNone(User.query.filter_by(username="mohammad").first())
 
         # حالا با حساب مدیر
-        self.client.get("/logout")
-        self.register_and_login("smq2458", "adminpassword")
+        self.client.post("/logout")
+        self.create_admin_and_login()
 
         # ۱) ویرایش کاربر: مشخصات، نام کاربری و رمز عبور
         res = self.client.post(f"/api/admin/users/{target_id}/update",
@@ -389,7 +443,7 @@ class ListiaTestCase(unittest.TestCase):
                                    "last_name": "محمدی",
                                    "mobile": "۰۹۱۲ ۱۱۱ ۲۲۳۳",
                                    "username": "mohammad-new",
-                                   "new_password": "9876",
+                                   "new_password": "98765432",
                                },
                                headers={"X-Requested-With": "fetch"})
         self.assertEqual(res.status_code, 200)
@@ -400,7 +454,7 @@ class ListiaTestCase(unittest.TestCase):
             self.assertEqual(target.first_name, "محمد")
             self.assertEqual(target.last_name, "محمدی")
             self.assertEqual(target.mobile, "09121112233")
-            self.assertTrue(check_password_hash(target.password_hash, "9876"))
+            self.assertTrue(check_password_hash(target.password_hash, "98765432"))
 
         # ۲) ویرایش لایسنس: ۶۰ روزه
         res = self.client.post(f"/api/admin/users/{target_id}/license",
@@ -451,7 +505,7 @@ class ListiaTestCase(unittest.TestCase):
             self.assertEqual(Product.query.filter_by(owner_id=target_id).count(), 0)
 
     def test_smq2458_admin_and_license_generator(self):
-        self.register_and_login("smq2458", "adminpassword")
+        self.create_admin_and_login()
 
         with app.app_context():
             user = User.query.filter_by(username="smq2458").first()
@@ -482,6 +536,242 @@ class ListiaTestCase(unittest.TestCase):
         data = res.get_json()
         self.assertTrue(data["success"])
         self.assertTrue(data["license_key"].startswith("LST-90D-"))
+
+    def test_csrf_reserved_admin_and_secure_api_key_transport(self):
+        app.config["CSRF_PROTECT"] = True
+        try:
+            signup_page = self.client.get("/signup")
+            guest_token = self.csrf_from(signup_page)
+
+            missing_token = self.client.post(
+                "/signup",
+                data={
+                    "first_name": "کاربر",
+                    "last_name": "امن",
+                    "mobile": "09123334444",
+                    "username": "secure-user",
+                    "password": "securepass123",
+                },
+            )
+            self.assertEqual(missing_token.status_code, 403)
+
+            reserved = self.client.post(
+                "/signup",
+                data={
+                    "csrf_token": guest_token,
+                    "first_name": "مهاجم",
+                    "last_name": "آزمایشی",
+                    "mobile": "09123334445",
+                    "username": "SMQ2458",
+                    "password": "securepass123",
+                },
+            )
+            self.assertEqual(reserved.status_code, 403)
+            with app.app_context():
+                self.assertIsNone(User.query.filter_by(username="smq2458").first())
+
+            signup = self.client.post(
+                "/signup",
+                data={
+                    "csrf_token": guest_token,
+                    "first_name": "کاربر",
+                    "last_name": "امن",
+                    "mobile": "09123334444",
+                    "username": "secure-user",
+                    "password": "securepass123",
+                },
+            )
+            self.assertEqual(signup.status_code, 302)
+            cookies = "\n".join(signup.headers.getlist("Set-Cookie"))
+            self.assertIn("HttpOnly", cookies)
+            self.assertIn("SameSite=Lax", cookies)
+
+            suppliers_page = self.client.get("/suppliers")
+            user_token = self.csrf_from(suppliers_page)
+            blocked = self.client.post(
+                "/suppliers",
+                data={"name": "امن"},
+                headers={"X-Requested-With": "fetch"},
+            )
+            self.assertEqual(blocked.status_code, 403)
+            created = self.client.post(
+                "/suppliers",
+                data={"name": "امن"},
+                headers={
+                    "X-Requested-With": "fetch",
+                    "X-CSRF-Token": user_token,
+                },
+            )
+            self.assertEqual(created.status_code, 200)
+
+            with app.app_context():
+                user = User.query.filter_by(username="secure-user").first()
+                api_key = issue_api_token(user)
+
+            logged_out = self.client.post(
+                "/logout", data={"csrf_token": user_token}
+            )
+            self.assertEqual(logged_out.status_code, 302)
+
+            leaked_query_key = self.client.post(
+                f"/api/quick-add?key={api_key}",
+                data={"product": "کالای ناامن", "supplier": "امن"},
+            )
+            self.assertEqual(leaked_query_key.status_code, 403)
+
+            quick_add = self.client.post(
+                "/api/quick-add",
+                json={
+                    "product": "کالای امن",
+                    "quantity": "۲",
+                    "unit": "عدد",
+                    "supplier": "امن",
+                },
+                headers={"X-API-Key": api_key},
+            )
+            self.assertEqual(quick_add.status_code, 200)
+            self.assertEqual(quick_add.get_json()["product"]["quantity"], "2")
+            self.assertEqual(
+                self.client.get(
+                    "/api/quick-add", headers={"X-API-Key": api_key}
+                ).status_code,
+                405,
+            )
+        finally:
+            app.config["CSRF_PROTECT"] = False
+
+    def test_cross_account_writes_are_not_authorized(self):
+        self.register_and_login("owner-one", "password-one")
+        supplier = self.client.post(
+            "/suppliers",
+            data={"name": "مالک اول"},
+            headers={"X-Requested-With": "fetch"},
+        ).get_json()
+        product = self.client.post(
+            "/new-purchase",
+            data={
+                "supplier": supplier["id"],
+                "product": "خصوصی",
+                "quantity": "1",
+                "unit": "عدد",
+            },
+            headers={"X-Requested-With": "fetch"},
+        ).get_json()["product"]
+        self.client.post("/logout")
+        self.register_and_login("owner-two", "password-two")
+
+        self.assertEqual(
+            self.client.post(
+                f"/product/{product['id']}/delete",
+                headers={"X-Requested-With": "fetch"},
+            ).status_code,
+            404,
+        )
+        self.assertEqual(
+            self.client.post(
+                f"/supplier/{supplier['id']}/delete",
+                headers={"X-Requested-With": "fetch"},
+            ).status_code,
+            404,
+        )
+        with app.app_context():
+            self.assertIsNotNone(db.session.get(Product, product["id"]))
+            self.assertIsNotNone(db.session.get(Supplier, supplier["id"]))
+
+    def test_password_change_revokes_other_browser_sessions(self):
+        self.register_and_login("sessions-user", "old-password")
+        second_browser = app.test_client()
+        login = second_browser.post(
+            "/login",
+            data={"username": "sessions-user", "password": "old-password"},
+        )
+        self.assertEqual(login.status_code, 302)
+
+        changed = self.client.post(
+            "/account/password",
+            data={
+                "current_password": "old-password",
+                "new_password": "new-password",
+                "confirm_password": "new-password",
+            },
+            headers={"X-Requested-With": "fetch"},
+        )
+        self.assertEqual(changed.status_code, 200)
+        self.assertEqual(self.client.get("/account").status_code, 200)
+        stale = second_browser.get("/account")
+        self.assertEqual(stale.status_code, 302)
+        self.assertTrue(stale.headers["Location"].endswith("/login"))
+
+    def test_external_lengths_quantities_and_profile_are_validated(self):
+        self.create_admin_and_login()
+        too_long_supplier = self.client.post(
+            "/suppliers",
+            data={"name": "س" * 201},
+            headers={"X-Requested-With": "fetch"},
+        )
+        self.assertEqual(too_long_supplier.status_code, 400)
+
+        supplier_id = self.client.post(
+            "/suppliers",
+            data={"name": "تأمین معتبر"},
+            headers={"X-Requested-With": "fetch"},
+        ).get_json()["id"]
+        for product_name, quantity in (("ک" * 301, "1"), ("نامعتبر", "0"), ("اعشار", "1.2345")):
+            response = self.client.post(
+                "/new-purchase",
+                data={
+                    "supplier": supplier_id,
+                    "product": product_name,
+                    "quantity": quantity,
+                    "unit": "عدد",
+                },
+                headers={"X-Requested-With": "fetch"},
+            )
+            self.assertEqual(response.status_code, 400)
+
+        profile = self.client.post(
+            "/account/profile",
+            data={
+                "first_name": " مدیر ",
+                "last_name": " امن ",
+                "mobile": "+۹۸ ۹۱۲ ۳۴۵ ۶۷۸۹",
+            },
+            headers={"X-Requested-With": "fetch"},
+        )
+        self.assertEqual(profile.status_code, 200)
+        self.assertEqual(profile.get_json()["profile"]["mobile"], "09123456789")
+
+    def test_admin_user_page_uses_aggregate_count_queries(self):
+        self.create_admin_and_login()
+        with app.app_context():
+            for index in range(8):
+                user = User(
+                    username=f"aggregate-{index}",
+                    password_hash=generate_password_hash("password123"),
+                    is_admin=False,
+                    is_licensed=False,
+                )
+                db.session.add(user)
+            db.session.commit()
+            engine = db.engine
+
+        statements = []
+
+        def count_statement(_conn, _cursor, statement, _parameters, _context, _many):
+            statements.append(statement)
+
+        event.listen(engine, "before_cursor_execute", count_statement)
+        try:
+            response = self.client.get("/admin/license-generator")
+        finally:
+            event.remove(engine, "before_cursor_execute", count_statement)
+        self.assertEqual(response.status_code, 200)
+        count_queries = [
+            statement
+            for statement in statements
+            if "count(" in statement.lower()
+        ]
+        self.assertLessEqual(len(count_queries), 4)
 
 
 if __name__ == "__main__":

@@ -243,11 +243,15 @@ kbd {
 
 .sidebar-username { flex: 1; color: #C6D3DC; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+.sidebar-logout-form { margin: 0; }
 .sidebar-logout {
   color: var(--sidebar-ink); display: flex; padding: 5px;
+  border: 0; background: transparent; cursor: pointer;
   border-radius: 7px; transition: background var(--fast), color var(--fast);
 }
 .sidebar-logout:hover { background: rgba(255,255,255,.09); color: #fff; }
+
+.mobile-quota-bar { display: none; }
 
 .sidebar-footer { font-size: 11px; color: #61778C; padding: 0 6px; font-family: var(--font-body); }
 
@@ -1421,6 +1425,14 @@ tr.row-out { animation: rowOut .16s var(--ease) both; }
   .nav a:hover { transform: none; }
 
   main.content { padding: 16px 12px 56px; }
+  .mobile-quota-bar {
+    width: 100%; display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; margin: 0 0 12px; padding: 9px 12px;
+    border: 1px solid #E8D09F; border-radius: var(--radius-sm);
+    background: #FFF7E5; color: #755116; font: 600 11.5px var(--font-body);
+    cursor: pointer; overflow-x: auto; white-space: nowrap;
+  }
+  .mobile-quota-bar b { font-family: var(--font-mono); color: var(--teal); }
   .global-search { width: 100%; margin-bottom: 20px; }
   .global-search-shortcut { display: none; }
   .global-search-form { height: 46px; }

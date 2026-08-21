@@ -118,8 +118,10 @@
         id="qa-quantity"
         class="field mono"
         type="number"
-        inputmode="numeric"
-        min="0"
+        inputmode="decimal"
+        min="0.001"
+        max="999999999"
+        step="0.001"
         placeholder="تعداد"
         {{ 'disabled' if (limits and not limits.can_add_product) else '' }}
       >

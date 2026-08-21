@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#142430">
+  <meta name="csrf-token" content="{{ csrf_token }}">
   <title>{{ 'ثبت‌نام در لیستیا' if mode == 'signup' else 'ورود به لیستیا' }} · لیستیا</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico?v={{ asset_v }}">
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v={{ asset_v }}">
@@ -93,16 +94,6 @@
   </style>
 </head>
 <body>
-  <script>
-    (function () {
-      if (sessionStorage.getItem("listia_auth_fail")) return;
-      var token = null;
-      try { token = localStorage.getItem("listia_auth"); } catch (e) {}
-      if (!token) return;
-      sessionStorage.setItem("listia_auth_fail", "1");
-      location.replace("/?auth=" + encodeURIComponent(token));
-    })();
-  </script>
   <div class="login-shell">
     <div class="login-card">
       <div class="login-brand">
@@ -121,13 +112,14 @@
       {% if mode == 'signup' %}
         <div class="login-hint">حساب جدید آزمایشی: شامل ۱ تأمین‌کننده و ۵ محصول برای شروع سریع.</div>
         <form method="POST" action="/signup">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <div class="login-name-row">
-            <input class="login-field" name="first_name" maxlength="100" placeholder="نام" autocomplete="given-name" value="{{ request.form.get('first_name', '') }}" required autofocus>
-            <input class="login-field" name="last_name" maxlength="100" placeholder="نام خانوادگی" autocomplete="family-name" value="{{ request.form.get('last_name', '') }}" required>
+            <input class="login-field" name="first_name" maxlength="100" placeholder="نام" aria-label="نام" autocomplete="given-name" value="{{ request.form.get('first_name', '') }}" required autofocus>
+            <input class="login-field" name="last_name" maxlength="100" placeholder="نام خانوادگی" aria-label="نام خانوادگی" autocomplete="family-name" value="{{ request.form.get('last_name', '') }}" required>
           </div>
-          <input class="login-field login-phone" name="mobile" maxlength="20" inputmode="tel" placeholder="شماره موبایل (مثلاً 09121234567)" autocomplete="tel" value="{{ request.form.get('mobile', '') }}" required>
-          <input class="login-field" name="username" maxlength="100" placeholder="نام کاربری" autocomplete="username" value="{{ request.form.get('username', '') }}" required>
-          <input class="login-field" name="password" type="password" minlength="4" placeholder="رمز عبور" autocomplete="new-password" required>
+          <input class="login-field login-phone" name="mobile" maxlength="20" inputmode="tel" placeholder="شماره موبایل (مثلاً 09121234567)" aria-label="شماره موبایل" autocomplete="tel" value="{{ request.form.get('mobile', '') }}" required>
+          <input class="login-field" name="username" maxlength="100" placeholder="نام کاربری" aria-label="نام کاربری" autocomplete="username" value="{{ request.form.get('username', '') }}" required>
+          <input class="login-field" name="password" type="password" minlength="8" maxlength="128" placeholder="رمز عبور (حداقل ۸ کاراکتر)" aria-label="رمز عبور" autocomplete="new-password" required>
           <button type="submit" class="login-btn signup">ساخت حساب کاربری</button>
         </form>
         <div class="login-switch">
@@ -135,8 +127,9 @@
         </div>
       {% else %}
         <form method="POST" action="/login">
-          <input class="login-field" name="username" placeholder="نام کاربری" autocomplete="username" required autofocus>
-          <input class="login-field" name="password" type="password" placeholder="رمز عبور" autocomplete="current-password" required>
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input class="login-field" name="username" maxlength="100" placeholder="نام کاربری" aria-label="نام کاربری" autocomplete="username" required autofocus>
+          <input class="login-field" name="password" type="password" placeholder="رمز عبور" aria-label="رمز عبور" autocomplete="current-password" required>
           <button type="submit" class="login-btn">ورود</button>
         </form>
         <div class="login-switch">

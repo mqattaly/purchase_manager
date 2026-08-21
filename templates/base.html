@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#142430">
+  <meta name="csrf-token" content="{{ csrf_token }}">
   <title>{% block title %}لیستیا{% endblock %}</title>
   <link rel="icon" type="image/x-icon" href="/favicon.ico?v={{ asset_v }}">
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v={{ asset_v }}">
@@ -23,38 +24,6 @@
   <script src="{{ url_for('static', filename='app.js') }}?v={{ asset_v }}" defer></script>
 </head>
 <body>
-  <script>
-    (function () {
-      function token() {
-        try { return localStorage.getItem("listia_auth"); } catch (e) { return null; }
-      }
-      var authed = {{ 'true' if current_user.is_authenticated else 'false' }};
-      var t = token();
-      if (!authed && t) {
-        var u = new URL(location.href);
-        if (!u.searchParams.get("auth")) {
-          u.searchParams.set("auth", t);
-          location.replace(u.pathname + u.search + u.hash);
-          return;
-        }
-      }
-      document.addEventListener("click", function (e) {
-        var a = e.target.closest && e.target.closest("a[href]");
-        if (!a) return;
-        var tok = token();
-        if (!tok) return;
-        var href = a.getAttribute("href");
-        if (!href || href.charAt(0) === "#" || href.indexOf("javascript:") === 0) return;
-        var dest;
-        try { dest = new URL(a.href, location.origin); } catch (err) { return; }
-        if (dest.origin !== location.origin) return;
-        if (dest.searchParams.get("auth")) return;
-        dest.searchParams.set("auth", tok);
-        a.href = dest.pathname + dest.search + dest.hash;
-      }, true);
-    })();
-  </script>
-
   <div class="shell">
 
     <aside class="sidebar">
@@ -117,18 +86,18 @@
               </div>
             </div>
           {% elif limits.is_expired %}
-            <div class="sidebar-license trial" onclick="openLicenseModal()" role="button" tabindex="0" style="background:rgba(192,69,60,.14); border-color:rgba(192,69,60,.38);">
+            <div class="sidebar-license trial" onclick="openLicenseModal()" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openLicenseModal();}" style="background:rgba(192,69,60,.14); border-color:rgba(192,69,60,.38);">
               <div class="lic-top">
                 <span class="lic-badge" style="color:#FFB3AB;">⚠️ لایسنس منقضی شده</span>
                 <span class="lic-action-text" style="color:#FFB3AB;">تمدید ↗</span>
               </div>
               <div style="font-size:10.5px; color:#E1D0C4; margin:2px 0 6px;">انقضا: {{ limits.expires_at_label }}</div>
               <div class="lic-progress-row" aria-live="polite">
-                <span>تأمین‌کننده: <b id="sidebar-supplier-count">{{ limits.supplier_count }}</b>/1</span>
-                <span>کالا: <b id="sidebar-product-count">{{ limits.product_count }}</b>/5</span>
+                <span>تأمین‌کننده: <b id="sidebar-supplier-count" data-quota-kind="supplier">{{ limits.supplier_count }}</b>/1</span>
+                <span>کالا: <b id="sidebar-product-count" data-quota-kind="product">{{ limits.product_count }}</b>/5</span>
               </div>
               <div class="lic-bar">
-                <div id="sidebar-product-progress" class="lic-bar-fill" style="width: {{ [((limits.product_count / 5) * 100)|int, 100]|min }}%;"></div>
+                <div id="sidebar-product-progress" data-quota-progress="product" class="lic-bar-fill" style="width: {{ [((limits.product_count / 5) * 100)|int, 100]|min }}%;"></div>
               </div>
             </div>
           {% elif limits.is_licensed %}
@@ -145,17 +114,17 @@
               </div>
             </div>
           {% else %}
-            <div class="sidebar-license trial" onclick="openLicenseModal()" role="button" tabindex="0" title="برای ارتقا کلیک کنید">
+            <div class="sidebar-license trial" onclick="openLicenseModal()" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openLicenseModal();}" title="برای ارتقا کلیک کنید">
               <div class="lic-top">
                 <span class="lic-badge">نسخه آزمایشی</span>
                 <span class="lic-action-text">خرید لایسنس ↗</span>
               </div>
               <div class="lic-progress-row" aria-live="polite">
-                <span>تأمین‌کننده: <b id="sidebar-supplier-count">{{ limits.supplier_count }}</b>/1</span>
-                <span>کالا: <b id="sidebar-product-count">{{ limits.product_count }}</b>/5</span>
+                <span>تأمین‌کننده: <b id="sidebar-supplier-count" data-quota-kind="supplier">{{ limits.supplier_count }}</b>/1</span>
+                <span>کالا: <b id="sidebar-product-count" data-quota-kind="product">{{ limits.product_count }}</b>/5</span>
               </div>
               <div class="lic-bar">
-                <div id="sidebar-product-progress" class="lic-bar-fill" style="width: {{ [((limits.product_count / 5) * 100)|int, 100]|min }}%;"></div>
+                <div id="sidebar-product-progress" data-quota-progress="product" class="lic-bar-fill" style="width: {{ [((limits.product_count / 5) * 100)|int, 100]|min }}%;"></div>
               </div>
             </div>
           {% endif %}
@@ -167,15 +136,26 @@
           <span class="sidebar-avatar">{{ current_user.username[:1]|upper }}</span>
           <span class="sidebar-username">{{ current_user.username }}</span>
         {% endif %}
-        <a href="/logout" class="sidebar-logout" title="خروج">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
-        </a>
+        <form method="POST" action="{{ url_for('logout') }}" class="sidebar-logout-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit" class="sidebar-logout" title="خروج" aria-label="خروج از حساب">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+          </button>
+        </form>
       </div>
 
       <div class="sidebar-footer">طراحی و توسعه: س.م.قتالی</div>
     </aside>
 
     <main class="content">
+      {% if current_user.is_authenticated and limits and not is_admin and not limits.is_licensed %}
+        <button type="button" class="mobile-quota-bar" onclick="openLicenseModal()" aria-label="نمایش وضعیت سهمیه و لایسنس">
+          <span>{{ 'لایسنس منقضی' if limits.is_expired else 'نسخه آزمایشی' }}</span>
+          <span>تأمین‌کننده <b data-quota-kind="supplier">{{ limits.supplier_count }}</b>/1</span>
+          <span>کالا <b data-quota-kind="product">{{ limits.product_count }}</b>/5</span>
+          <span aria-hidden="true">ارتقا ←</span>
+        </button>
+      {% endif %}
       <div id="global-search" class="global-search">
         <form id="global-search-form" class="global-search-form" action="{{ url_for('search') }}" method="GET" role="search">
           <svg class="global-search-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.8-3.8"/></svg>
@@ -215,12 +195,12 @@
 
   <!-- License Activation Modal -->
   <div id="license-modal" class="modal-backdrop" hidden>
-    <div class="modal-card">
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="license-modal-title">
       <div class="modal-head">
         <div class="modal-title-group">
           <span class="modal-icon">🔑</span>
           <div>
-            <h2 class="modal-title">فعال‌سازی / تمدید لایسنس لیستیا</h2>
+            <h2 id="license-modal-title" class="modal-title">فعال‌سازی / تمدید لایسنس لیستیا</h2>
             <div class="modal-sub">حذف محدودیت ثبت تأمین‌کننده و کالا</div>
           </div>
         </div>
@@ -250,11 +230,11 @@
             <div class="license-quota-box">
               <div class="quota-item">
                 <span class="quota-name">تأمین‌کننده‌های ثبت‌شده:</span>
-                <span class="quota-val mono"><b id="modal-supplier-count">{{ limits.supplier_count }}</b> / 1</span>
+                <span class="quota-val mono"><b id="modal-supplier-count" data-quota-kind="supplier">{{ limits.supplier_count }}</b> / 1</span>
               </div>
               <div class="quota-item">
                 <span class="quota-name">محصولات ثبت‌شده:</span>
-                <span class="quota-val mono"><b id="modal-product-count">{{ limits.product_count }}</b> / 5</span>
+                <span class="quota-val mono"><b id="modal-product-count" data-quota-kind="product">{{ limits.product_count }}</b> / 5</span>
               </div>
             </div>
             <div class="license-notice">
@@ -274,7 +254,7 @@
         <form id="modal-license-form" style="margin-top: 18px;" onsubmit="handleLicenseSubmit(event)">
           <div class="field-group">
             <label class="field-label" for="modal-license-key">کلید لایسنس دریافتی را اینجا وارد کنید:</label>
-            <input id="modal-license-key" class="field mono" placeholder="مثال: LST-30D-XXXX-XXXX-XXXX یا LST-LIFE-..." required autocomplete="off" style="text-transform:uppercase;">
+            <input id="modal-license-key" class="field mono" placeholder="مثال: LST-30D-NNNNNNNN-XXXX-XXXX-XXXX-XXXX-XXXX" required autocomplete="off" style="text-transform:uppercase;">
           </div>
           <div id="modal-license-error" class="flash flash-error" style="display:none; margin-top:10px;"></div>
           <div id="modal-license-success" class="flash flash-success" style="display:none; margin-top:10px;"></div>

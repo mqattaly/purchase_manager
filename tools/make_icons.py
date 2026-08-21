@@ -1,35 +1,42 @@
-"""ساخت آیکون‌های بهینه لیستیا از روی فایل اصلی لوگو.
+"""Build optimized Listia icons from the square source logo.
 
-استفاده:
+Usage:
     pip install pillow
-    python tools/make_icons.py            # از static/logo.png می‌خواند
-    python tools/make_icons.py my-logo.png
-
-خروجی‌ها در پوشه static ساخته می‌شوند:
-    logo-192.png, logo-512.png, apple-touch-icon.png,
-    favicon-32.png, favicon-16.png, favicon.ico
+    python tools/make_icons.py [optional-source.png]
 """
 
-import os
 import sys
+from pathlib import Path
 
 from PIL import Image
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-STATIC_DIR = os.path.join(BASE_DIR, "static")
-
-TARGETS = [
+BASE_DIR = Path(__file__).resolve().parent.parent
+STATIC_DIR = BASE_DIR / "static"
+TARGETS = (
     ("logo-192.png", 192),
     ("logo-512.png", 512),
     ("apple-touch-icon.png", 180),
+    ("favicon.png", 256),
     ("favicon-32.png", 32),
     ("favicon-16.png", 16),
-]
+)
+
+
+def optimized_png(image, size, output):
+    resized = image.resize((size, size), Image.Resampling.LANCZOS)
+    # A palette is materially smaller for app icons and remains visually
+    # indistinguishable at these sizes. FASTOCTREE preserves RGBA transparency.
+    quantized = resized.quantize(
+        colors=256,
+        method=Image.Quantize.FASTOCTREE,
+        dither=Image.Dither.FLOYDSTEINBERG,
+    )
+    quantized.save(output, "PNG", optimize=True)
 
 
 def main():
-    source = sys.argv[1] if len(sys.argv) > 1 else os.path.join(STATIC_DIR, "logo.png")
-    if not os.path.exists(source):
+    source = Path(sys.argv[1]) if len(sys.argv) > 1 else STATIC_DIR / "logo.png"
+    if not source.exists():
         print(f"فایل لوگو پیدا نشد: {source}")
         return 1
 
@@ -40,15 +47,16 @@ def main():
     image = image.crop((left, top, left + side, top + side))
 
     for name, size in TARGETS:
-        out = os.path.join(STATIC_DIR, name)
-        image.resize((size, size), Image.LANCZOS).save(out, "PNG", optimize=True)
-        print(f"✓ {name} ({size}×{size}) — {os.path.getsize(out) // 1024} KB")
+        output = STATIC_DIR / name
+        optimized_png(image, size, output)
+        print(f"✓ {name} ({size}×{size}) — {output.stat().st_size // 1024} KB")
 
-    ico_path = os.path.join(STATIC_DIR, "favicon.ico")
-    image.resize((64, 64), Image.LANCZOS).save(
-        ico_path, sizes=[(16, 16), (32, 32), (48, 48), (64, 64)]
+    icon_path = STATIC_DIR / "favicon.ico"
+    image.resize((64, 64), Image.Resampling.LANCZOS).save(
+        icon_path,
+        sizes=[(16, 16), (32, 32), (48, 48), (64, 64)],
     )
-    print(f"✓ favicon.ico — {os.path.getsize(ico_path) // 1024} KB")
+    print(f"✓ favicon.ico — {icon_path.stat().st_size // 1024} KB")
     return 0
 
 

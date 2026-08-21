@@ -65,8 +65,9 @@
 
           searchStatus.textContent = products.length + " محصول پیدا شد:";
           resultsBody.innerHTML = products.map(function (p) {
+            const href = '/supplier/' + p.supplier_id + '?highlight=' + p.id;
             return (
-              '<tr class="search-row" onclick="location.href=\'/supplier/' + p.supplier_id + '?highlight=' + p.id + '\'">' +
+              '<tr class="search-row" role="link" tabindex="0" data-href="' + escapeAttr(href) + '">' +
                 '<td>' + escapeHtml(p.supplier_name) + '</td>' +
                 '<td><strong>' + escapeHtml(p.product_name) + '</strong></td>' +
                 '<td class="mono">' + escapeHtml(p.quantity) + '</td>' +
@@ -81,6 +82,18 @@
           searchStatus.textContent = "خطا در ارتباط با سرور";
         });
     }
+
+    resultsBody.addEventListener("click", function (event) {
+      const row = event.target.closest("tr[data-href]");
+      if (row) location.href = row.dataset.href;
+    });
+    resultsBody.addEventListener("keydown", function (event) {
+      const row = event.target.closest("tr[data-href]");
+      if (row && (event.key === "Enter" || event.key === " ")) {
+        event.preventDefault();
+        location.href = row.dataset.href;
+      }
+    });
 
     searchInput.addEventListener("input", function () {
       clearTimeout(timer);

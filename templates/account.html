@@ -138,7 +138,7 @@
 
       <div class="field-label">۲. ثبت کلید لایسنس دریافتی:</div>
       <form id="license-form" class="field-row" style="align-items:flex-start;">
-        <input id="license-key-input" class="field mono" style="flex:1; min-width:240px; text-transform:uppercase;" placeholder="مثال: LST-30D-XXXX-XXXX-XXXX یا LST-LIFE-..." autocomplete="off" required>
+        <input id="license-key-input" class="field mono" style="flex:1; min-width:240px; text-transform:uppercase;" placeholder="مثال: LST-30D-NNNNNNNN-XXXX-XXXX-XXXX-XXXX-XXXX" autocomplete="off" required>
         <button id="license-btn" type="submit" class="btn btn-accent">فعال‌سازی / تمدید لایسنس</button>
       </form>
       <div id="account-license-error" class="flash flash-error" style="display:none; margin-top:10px;"></div>
@@ -160,11 +160,21 @@
   </div>
 
   <div class="card card-pad" style="margin-bottom:22px;">
+    <h3 class="account-section-title">اطلاعات تماس</h3>
+    <form id="profile-form" class="field-row">
+      <input id="profile-first-name" class="field" style="width:170px" maxlength="100" value="{{ current_user.first_name or '' }}" placeholder="نام" autocomplete="given-name" required>
+      <input id="profile-last-name" class="field" style="width:190px" maxlength="100" value="{{ current_user.last_name or '' }}" placeholder="نام خانوادگی" autocomplete="family-name" required>
+      <input id="profile-mobile" class="field mono" dir="ltr" style="width:180px" maxlength="20" inputmode="tel" value="{{ current_user.mobile or '' }}" placeholder="09121234567" autocomplete="tel" required>
+      <button id="profile-btn" type="submit" class="btn btn-accent">ذخیره اطلاعات</button>
+    </form>
+  </div>
+
+  <div class="card card-pad" style="margin-bottom:22px;">
     <h3 class="account-section-title">تغییر رمز عبور</h3>
     <form id="password-form" class="field-row">
       <input id="current-password" class="field" style="width:170px" type="password" placeholder="رمز عبور فعلی" autocomplete="current-password" required>
-      <input id="new-password" class="field" style="width:170px" type="password" placeholder="رمز جدید" autocomplete="new-password" required>
-      <input id="confirm-password" class="field" style="width:170px" type="password" placeholder="تکرار رمز جدید" autocomplete="new-password" required>
+      <input id="new-password" class="field" style="width:190px" type="password" minlength="8" maxlength="128" placeholder="رمز جدید (حداقل ۸ کاراکتر)" autocomplete="new-password" required>
+      <input id="confirm-password" class="field" style="width:190px" type="password" minlength="8" maxlength="128" placeholder="تکرار رمز جدید" autocomplete="new-password" required>
       <button id="password-btn" type="submit" class="btn btn-accent">ذخیره رمز عبور</button>
     </form>
   </div>
@@ -177,33 +187,39 @@
     </div>
 
     <div class="token-row">
-      <input id="api-token" class="field mono" readonly value="{{ api_token }}" style="flex:1; min-width:220px;">
-      <button type="button" class="btn btn-ghost" onclick="copyToken()">کپی کلید</button>
-      <button type="button" class="btn btn-ghost" onclick="rotateToken()">کلید تازه</button>
+      <input id="api-token" class="field mono" readonly value="{{ shortcut_key_value }}" data-configured="{{ '1' if shortcut_key_configured else '0' }}" placeholder="{{ 'کلید قبلاً ساخته شده؛ برای مشاهده، آن را تعویض کنید' if shortcut_key_configured else 'هنوز کلیدی ساخته نشده است' }}" style="flex:1; min-width:220px;">
+      <button id="copy-api-token" type="button" class="btn btn-ghost" onclick="copyToken()" disabled>کپی کلید</button>
+      <button id="rotate-api-token" type="button" class="btn btn-ghost" onclick="rotateToken()">{{ 'تعویض کلید' if shortcut_key_configured else 'ساخت کلید' }}</button>
     </div>
+    <div class="page-sub" style="margin-top:8px;">برای امنیت، مقدار کلید فقط همان لحظه ساخت نمایش داده می‌شود؛ آن را در Shortcuts ذخیره کنید.</div>
 
-    <div class="field-label" style="margin-top:16px;">آدرس ثبت (هم POST، هم باز کردن ساده در مرورگر):</div>
+    <div class="field-label" style="margin-top:16px;">آدرس امن ثبت (فقط درخواست POST):</div>
     <div class="token-row">
       <input id="api-url" class="field mono" readonly
-             value="{{ api_base }}/api/quick-add?key={{ api_token }}&product=روغن&quantity=2&unit=عدد"
+             value="{{ api_base }}/api/quick-add"
              style="flex:1; min-width:260px;">
       <button type="button" class="btn btn-ghost" onclick="copyUrl()">کپی آدرس</button>
     </div>
 
-    <div class="page-sub" style="margin-top:12px;">
-      پارامترها: <code>product</code> (الزامی) · <code>quantity</code> (پیش‌فرض ۱) ·
+    <div class="page-sub" style="margin-top:12px; line-height:1.9;">
+      در Shortcuts، روش درخواست را <code>POST</code> بگذار، کلید بالا را در هدر
+      <code>X-API-Key</code> قرار بده و فیلدهای فرم یا JSON را بفرست:
+      <code>product</code> (الزامی) · <code>quantity</code> (پیش‌فرض ۱) ·
       <code>unit</code> (عدد/کارتن/بسته/گونی/کیلو) · <code>supplier</code> (نام یا شناسه) ·
-      <code>description</code>
+      <code>description</code>. کلید دیگر در آدرس قرار نمی‌گیرد تا در تاریخچه و گزارش سرور فاش نشود.
     </div>
   </div>
 
   <div class="card card-pad">
     <h3 class="account-section-title">خروج از حساب</h3>
     <div class="page-sub" style="margin-bottom:14px;">با خروج، برای دیدن اطلاعاتت باید دوباره وارد شوی.</div>
-    <a href="/logout" class="btn btn-ghost">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
-      خروج از حساب
-    </a>
+    <form method="POST" action="{{ url_for('logout') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="btn btn-ghost">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>
+        خروج از حساب
+      </button>
+    </form>
   </div>
 
   <script>
@@ -261,6 +277,20 @@
       copyField("account-user-code", "شناسه فعال‌سازی کپی شد");
     }
 
+    document.getElementById("profile-form").addEventListener("submit", function (e) {
+      e.preventDefault();
+      const firstName = document.getElementById("profile-first-name").value.trim();
+      const lastName = document.getElementById("profile-last-name").value.trim();
+      const mobile = document.getElementById("profile-mobile").value.trim();
+      if (!firstName || !lastName || !mobile) return;
+      post("/account/profile",
+        { first_name: firstName, last_name: lastName, mobile: mobile },
+        document.getElementById("profile-btn"), function (data) {
+          document.getElementById("profile-mobile").value = data.profile.mobile;
+          showSuccess(data.message || "اطلاعات حساب ذخیره شد");
+        });
+    });
+
     document.getElementById("password-form").addEventListener("submit", function (e) {
       e.preventDefault();
       const currentPassword = document.getElementById("current-password").value;
@@ -296,14 +326,17 @@
     function copyUrl() { copyField("api-url", "آدرس کپی شد"); }
 
     function rotateToken() {
-      if (!confirm("کلید فعلی از کار می‌افتد و میان‌برهای قبلی باید به‌روز شوند. ادامه؟")) return;
+      const tokenField = document.getElementById("api-token");
+      const hasConfiguredToken = tokenField.dataset.configured === "1";
+      if (hasConfiguredToken && !confirm("کلید فعلی از کار می‌افتد و میان‌برهای قبلی باید به‌روز شوند. ادامه؟")) return;
       App.request("/account/token", { method: "POST" })
         .then(function (result) {
           if (!result.ok) { showError("کلید عوض نشد"); return; }
           const token = result.data.token;
-          const url = document.getElementById("api-url");
-          url.value = url.value.replace(/key=[^&]*/, "key=" + encodeURIComponent(token));
           document.getElementById("api-token").value = token;
+          document.getElementById("api-token").dataset.configured = "1";
+          document.getElementById("copy-api-token").disabled = false;
+          document.getElementById("rotate-api-token").textContent = "کلید تازه";
           showSuccess("کلید تازه ساخته شد");
         })
         .catch(function () { showError("خطا در ارتباط با سرور"); });
