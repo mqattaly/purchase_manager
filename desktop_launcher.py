@@ -255,4 +255,100 @@ def _install_webview2():
         if not local and installer:
             shutil.rmtree(os.path.dirname(installer), ignore_errors=True)
 
-    return 
+    return _webview2_installed()
+
+
+def _ask_yes_no(text, title):
+    """دیالوگ بله/خیر بومی ویندوز؛ True یعنی کاربر بله را زد."""
+    try:
+        import ctypes
+
+        result = ctypes.windll.user32.MessageBoxW(0, text, title, 0x24)  # MB_YESNO | MB_ICONQUESTION
+        return result == 6  # IDYES
+    except Exception:
+        return True
+
+
+def main():
+    _load_env_file()
+
+    if sys.platform != "win32":
+        _message_box(
+            "این برنامه مخصوص ویندوز است و روی سیستم‌عامل فعلی اجرا نمی‌شود.",
+            _window_title(),
+            error=True,
+        )
+        return 1
+
+    import webview
+
+    app_url = _app_url()
+    title = _window_title()
+    user_data_dir = _user_data_dir()
+    os.makedirs(user_data_dir, exist_ok=True)
+
+    # اجازهٔ دانلود (فایل نمونهٔ اکسل) با دیالوگ «ذخیره در…» بومی ویندوز.
+    webview.settings["ALLOW_DOWNLOADS"] = True
+
+    # روی ویندوزهای قدیمی ممکن است موتور WebView2 نصب نباشد؛ در این صورت
+    # ابتدا پیشنهاد نصب خودکار (رسمی مایکروسافت) می‌دهیم تا کاربر دستی کاری نکند.
+    if not _webview2_installed():
+        want_install = _ask_yes_no(
+            "برای اجرای لیستیا به «Microsoft Edge WebView2 Runtime» نیاز است.\n\n"
+            "این مؤلفهٔ رسمی و رایگان مایکروسافت معمولاً همراه ویندوز ۱۰/۱۱ نصب است،\n"
+            "اما روی این سیستم پیدا نشد.\n\n"
+            "آیا همین حالا به‌صورت خودکار دانلود و نصب شود؟\n"
+            "(نصب یک‌باره است و بعد از آن برنامه بدون مشکل اجرا می‌شود.)",
+            title,
+        )
+        if want_install and _install_webview2():
+            _message_box(
+                "WebView2 با موفقیت نصب شد. پنجرهٔ برنامه اکنون باز می‌شود.",
+                title,
+            )
+        else:
+            _message_box(
+                "برای اجرای لیستیا باید «Microsoft Edge WebView2 Runtime» نصب شود.\n\n"
+                "لینک دانلود رسمی مایکروسافت را برایتان باز می‌کنم؛ بعد از نصب یک‌بارهٔ آن،\n"
+                "برنامه بدون مشکل اجرا می‌شود.",
+                title,
+                error=True,
+            )
+            try:
+                import webbrowser
+
+                webbrowser.open(WEBVIEW2_DOWNLOAD_URL)
+            except Exception:
+                pass
+            return 1
+
+    if not _check_reachable(app_url):
+        _message_box(
+            "به سرور لیستیا دسترسی پیدا نشد.\n\n"
+            "لطفاً اتصال اینترنت را بررسی و دوباره تلاش کنید.\n"
+            f"آدرس برنامه: {app_url}",
+            title,
+            error=True,
+        )
+
+    window = webview.create_window(
+        title=title,
+        url=app_url,
+        width=1280,
+        height=820,
+        min_size=(980, 640),
+        background_color="#142430",
+    )
+
+    webview.start(
+        private_mode=False,          # حفظ نشست/ورود بین دفعات اجرا
+        storage_path=user_data_dir,  # پوشهٔ پروفایل WebView2
+        icon=_icon_path(),
+        gui="edgechromium",
+        debug=False,
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
