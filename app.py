@@ -1,12 +1,14 @@
 import os
 import re
 import secrets
+import smtplib
 from datetime import date, datetime, timedelta
+from email.message import EmailMessage
 
 from dotenv import load_dotenv
 load_dotenv()
 
-from flask import Flask, g, render_template, request, redirect, url_for, send_file, make_response
+from flask import Flask, g, render_template, request, redirect, url_for, send_file, make_response, session
 from urllib.parse import urlparse
 import time
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
@@ -206,6 +208,100 @@ def clean_person_name(raw):
     return text[:100]
 
 
+def normalize_email(raw):
+    """ایمیل را برای ذخیره و جست‌وجوی یکتا نرمال می‌کند."""
+    email = (raw or "").strip().lower()
+    if not email or len(email) > 255:
+        return ""
+    # اعتبارسنجی سبک؛ اعتبار واقعی با دریافت کد در صندوق ایمیل انجام می‌شود.
+    if not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", email):
+        return None
+    return email
+
+
+def _email_taken(email, user_id=None):
+    query = User.query.filter(db.func.lower(User.email) == email.lower())
+    if user_id is not None:
+        query = query.filter(User.id != user_id)
+    return query.first() is not None
+
+
+def smtp_configured():
+    return bool(os.environ.get("SMTP_HOST") and os.environ.get("SMTP_USERNAME") and os.environ.get("SMTP_PASSWORD"))
+
+
+def send_email(to_email, subject, body):
+    """ارسال ایمیل با SMTP دامنه/هاست.
+
+    متغیرهای محیطی مورد نیاز روی سرور:
+    SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD
+    اختیاری: SMTP_FROM, SMTP_USE_TLS=true/false, SMTP_USE_SSL=true/false
+    """
+    host = os.environ.get("SMTP_HOST", "").strip()
+    username = os.environ.get("SMTP_USERNAME", "").strip()
+    password = os.environ.get("SMTP_PASSWORD", "")
+    if not host or not username or not password:
+        raise RuntimeError("SMTP تنظیم نشده است.")
+
+    port = int(os.environ.get("SMTP_PORT", "465"))
+    use_ssl = os.environ.get("SMTP_USE_SSL", "").strip().lower() in {"1", "true", "yes", "on"} or port == 465
+    use_tls = os.environ.get("SMTP_USE_TLS", "true").strip().lower() in {"1", "true", "yes", "on"}
+    from_email = os.environ.get("SMTP_FROM", username).strip() or username
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = from_email
+    msg["To"] = to_email
+    msg.set_content(body)
+
+    if use_ssl:
+        with smtplib.SMTP_SSL(host, port, timeout=15) as smtp:
+            smtp.login(username, password)
+            smtp.send_message(msg)
+    else:
+        with smtplib.SMTP(host, port, timeout=15) as smtp:
+            if use_tls:
+                smtp.starttls()
+            smtp.login(username, password)
+            smtp.send_message(msg)
+
+
+def make_email_verification_code(user):
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    user.email_verification_code_hash = generate_password_hash(code)
+    user.email_verification_sent_at = datetime.utcnow()
+    user.email_verification_expires_at = datetime.utcnow() + timedelta(minutes=15)
+    return code
+
+
+def send_verification_code(user):
+    code = make_email_verification_code(user)
+    db.session.commit()
+    body = (
+        f"سلام {user.first_name or ''}\n\n"
+        f"کد تایید ایمیل شما در لیستیا: {code}\n\n"
+        "این کد تا ۱۵ دقیقه معتبر است. اگر شما درخواست ثبت‌نام نداده‌اید، این پیام را نادیده بگیرید.\n"
+        "listia.ir"
+    )
+    send_email(user.email, "کد تایید ایمیل لیستیا", body)
+
+
+def send_welcome_email(user):
+    """ارسال پیام خوش‌آمد بعد از تایید موفق ایمیل."""
+    full_name = " ".join(part for part in (user.first_name, user.last_name) if part).strip()
+    greeting = full_name or user.username
+    body = (
+        f"سلام {greeting} عزیز\n\n"
+        "به لیستیا خوش آمدید. ایمیل شما با موفقیت تایید شد و حساب کاربری‌تان فعال است.\n\n"
+        "از حالا می‌توانید سفارش‌ها، تامین‌کننده‌ها و خریدهای فروشگاهتان را ساده‌تر مدیریت کنید.\n"
+        "برای ورود به لیستیا از این آدرس استفاده کنید:\n"
+        "https://listia.ir/login\n\n"
+        "با احترام\n"
+        "تیم لیستیا"
+    )
+    send_email(user.email, "به لیستیا خوش آمدید", body)
+
+
 # ترتیب الفبای فارسی — چون مرتب‌سازی پیش‌فرض دیتابیس روی حروف فارسی درست نیست
 PERSIAN_ALPHABET = "آابپتثجچحخدذرزژسشصضطظعغفقکگلمنوهی"
 _PERSIAN_RANK = {ch: index for index, ch in enumerate(PERSIAN_ALPHABET)}
@@ -307,6 +403,11 @@ class User(UserMixin, db.Model):
     first_name = db.Column(db.String(100), nullable=True)
     last_name = db.Column(db.String(100), nullable=True)
     phone = db.Column(db.String(20), nullable=True)
+    email = db.Column(db.String(255), unique=True, nullable=True)
+    email_verified = db.Column(db.Boolean, default=False)
+    email_verification_code_hash = db.Column(db.String(300), nullable=True)
+    email_verification_sent_at = db.Column(db.DateTime, nullable=True)
+    email_verification_expires_at = db.Column(db.DateTime, nullable=True)
     # کلید شخصی برای ثبت از بیرون اپ (مثلاً Shortcuts آیفون)
     api_token = db.Column(db.String(64), unique=True, nullable=True)
     # لایسنس نرم‌افزار لیستیا
@@ -685,6 +786,31 @@ def ensure_schema():
                     conn.execute(text('ALTER TABLE "user" ADD COLUMN phone VARCHAR(20)'))
                 except Exception:
                     pass
+            if "email" not in user_cols:
+                try:
+                    conn.execute(text('ALTER TABLE "user" ADD COLUMN email VARCHAR(255)'))
+                except Exception:
+                    pass
+            if "email_verified" not in user_cols:
+                try:
+                    conn.execute(text('ALTER TABLE "user" ADD COLUMN email_verified BOOLEAN DEFAULT FALSE'))
+                except Exception:
+                    pass
+            if "email_verification_code_hash" not in user_cols:
+                try:
+                    conn.execute(text('ALTER TABLE "user" ADD COLUMN email_verification_code_hash VARCHAR(300)'))
+                except Exception:
+                    pass
+            if "email_verification_sent_at" not in user_cols:
+                try:
+                    conn.execute(text('ALTER TABLE "user" ADD COLUMN email_verification_sent_at TIMESTAMP'))
+                except Exception:
+                    pass
+            if "email_verification_expires_at" not in user_cols:
+                try:
+                    conn.execute(text('ALTER TABLE "user" ADD COLUMN email_verification_expires_at TIMESTAMP'))
+                except Exception:
+                    pass
 
         try:
             conn.execute(
@@ -699,6 +825,7 @@ def ensure_schema():
             "CREATE INDEX IF NOT EXISTS ix_supplier_owner ON supplier (owner_id)",
             "CREATE INDEX IF NOT EXISTS ix_product_owner ON product (owner_id)",
             "CREATE INDEX IF NOT EXISTS ix_product_owner_ordered ON product (owner_id, ordered)",
+            "CREATE INDEX IF NOT EXISTS ix_user_email ON \"user\" (email)",
             "CREATE INDEX IF NOT EXISTS ix_product_supplier_ordered "
             "ON product (supplier_id, ordered, ordered_date)",
         ):
@@ -826,6 +953,8 @@ def _prepare_request():
     allowed = {
         "login",
         "signup",
+        "verify_email",
+        "resend_verification",
         "static",
         "api_quick_add",
         "api_suppliers",
@@ -1013,7 +1142,11 @@ def login():
                 user.is_admin = True
                 user.is_licensed = True
                 user.license_type = "UNLIMITED"
+                user.email_verified = True
                 db.session.commit()
+            if user.email and not user.email_verified:
+                session["pending_verification_user_id"] = user.id
+                return redirect(url_for("verify_email"))
             return login_handoff(user)
         record_attempt("login", ip)
         return render_template("login.html", mode="login", error="نام کاربری یا رمز عبور اشتباه است.")
@@ -1053,6 +1186,7 @@ def signup():
         first_name = clean_person_name(request.form.get("first_name", ""))
         last_name = clean_person_name(request.form.get("last_name", ""))
         phone = normalize_phone(request.form.get("phone", ""))
+        email = normalize_email(request.form.get("email", ""))
 
         if not first_name or not last_name:
             return render_template(
@@ -1062,6 +1196,11 @@ def signup():
             return render_template(
                 "login.html", mode="signup",
                 error="شماره موبایل معتبر وارد کنید (مثل 09123456789).",
+            )
+        if not email:
+            return render_template(
+                "login.html", mode="signup",
+                error="ایمیل معتبر وارد کنید تا کد تایید برایتان ارسال شود.",
             )
         if not username or not password:
             return render_template(
@@ -1079,6 +1218,10 @@ def signup():
             return render_template(
                 "login.html", mode="signup", error="این نام کاربری قبلاً وجود دارد."
             )
+        if _email_taken(email):
+            return render_template(
+                "login.html", mode="signup", error="این ایمیل قبلاً ثبت شده است."
+            )
 
         is_admin_account = username.lower() in ADMIN_USERNAMES
         user = User(
@@ -1087,6 +1230,8 @@ def signup():
             first_name=first_name,
             last_name=last_name,
             phone=phone,
+            email=email,
+            email_verified=is_admin_account,
             is_licensed=is_admin_account,
             license_type="UNLIMITED" if is_admin_account else "free",
             is_admin=is_admin_account,
@@ -1094,9 +1239,144 @@ def signup():
         db.session.add(user)
         db.session.commit()
         claim_orphaned_data(user.id)
-        return login_handoff(user)
+        if is_admin_account:
+            return login_handoff(user)
+        session["pending_verification_user_id"] = user.id
+        try:
+            send_verification_code(user)
+        except Exception:
+            app.logger.exception("ارسال ایمیل تایید ناموفق بود")
+            return render_template(
+                "login.html",
+                mode="verify",
+                email=user.email,
+                error="حساب ساخته شد اما ارسال ایمیل تایید ناموفق بود. تنظیمات SMTP سرور را بررسی کنید و سپس ارسال مجدد را بزنید.",
+            )
+        return render_template(
+            "login.html",
+            mode="verify",
+            email=user.email,
+            success="کد تایید ۶ رقمی به ایمیل شما ارسال شد.",
+        )
 
     return render_template("login.html", mode="signup", error=None)
+
+
+def _verification_user_from_request():
+    user_id = session.get("pending_verification_user_id")
+    if user_id:
+        user = db.session.get(User, int(user_id))
+        if user:
+            return user
+    email = normalize_email(request.form.get("email", "") or request.args.get("email", ""))
+    if email:
+        return User.query.filter(db.func.lower(User.email) == email.lower()).first()
+    return None
+
+
+@app.route("/verify-email", methods=["GET", "POST"])
+def verify_email():
+    if current_user.is_authenticated:
+        return redirect("/")
+
+    user = _verification_user_from_request()
+    email_value = user.email if user else (request.form.get("email", "") or request.args.get("email", ""))
+
+    if request.method == "POST":
+        ip = _request_ip()
+        if is_throttled("verify-email", ip, limit=12):
+            return render_template(
+                "login.html", mode="verify", email=email_value,
+                error="تلاش‌های تایید زیاد است. چند دقیقه بعد دوباره امتحان کنید.",
+            )
+        record_attempt("verify-email", ip)
+
+        code = (request.form.get("code", "") or "").strip().translate(_FA_DIGITS_TRANS)
+        code = re.sub(r"\D", "", code)
+        if not user or not user.email:
+            return render_template(
+                "login.html", mode="verify", email=email_value,
+                error="ابتدا ایمیلی را که با آن ثبت‌نام کرده‌اید وارد کنید.",
+            )
+        if user.email_verified:
+            session.pop("pending_verification_user_id", None)
+            return login_handoff(user)
+        if not code or len(code) != 6:
+            return render_template(
+                "login.html", mode="verify", email=user.email,
+                error="کد ۶ رقمی ارسال‌شده به ایمیل را وارد کنید.",
+            )
+        if not user.email_verification_code_hash:
+            return render_template(
+                "login.html", mode="verify", email=user.email,
+                error="کد فعالی برای این حساب وجود ندارد. ارسال مجدد کد را بزنید.",
+            )
+        if user.email_verification_expires_at and datetime.utcnow() > user.email_verification_expires_at:
+            return render_template(
+                "login.html", mode="verify", email=user.email,
+                error="مهلت این کد تمام شده است. ارسال مجدد کد را بزنید.",
+            )
+        if not check_password_hash(user.email_verification_code_hash, code):
+            return render_template(
+                "login.html", mode="verify", email=user.email,
+                error="کد تایید اشتباه است.",
+            )
+
+        clear_attempts("verify-email", ip)
+        user.email_verified = True
+        user.email_verification_code_hash = None
+        user.email_verification_sent_at = None
+        user.email_verification_expires_at = None
+        db.session.commit()
+        session.pop("pending_verification_user_id", None)
+        try:
+            send_welcome_email(user)
+        except Exception:
+            # تایید و ورود کاربر نباید به خاطر مشکل موقت SMTP ایمیل خوش‌آمد متوقف شود.
+            app.logger.exception("ارسال ایمیل خوش‌آمد ناموفق بود")
+        return login_handoff(user)
+
+    return render_template("login.html", mode="verify", email=email_value, error=None)
+
+
+@app.route("/resend-verification", methods=["POST"])
+def resend_verification():
+    if current_user.is_authenticated:
+        return redirect("/")
+    ip = _request_ip()
+    if is_throttled("resend-verification", ip, limit=5):
+        return render_template(
+            "login.html", mode="verify", email=request.form.get("email", ""),
+            error="ارسال مجدد زیاد انجام شده است. چند دقیقه بعد دوباره امتحان کنید.",
+        )
+    user = _verification_user_from_request()
+    if not user or not user.email:
+        return render_template(
+            "login.html", mode="verify", email=request.form.get("email", ""),
+            error="ایمیل ثبت‌نامی را وارد کنید.",
+        )
+    if user.email_verified:
+        session.pop("pending_verification_user_id", None)
+        return login_handoff(user)
+    if user.email_verification_sent_at and datetime.utcnow() - user.email_verification_sent_at < timedelta(seconds=60):
+        return render_template(
+            "login.html", mode="verify", email=user.email,
+            error="برای ارسال مجدد کد حداقل ۶۰ ثانیه صبر کنید.",
+        )
+    record_attempt("resend-verification", ip)
+    session["pending_verification_user_id"] = user.id
+    try:
+        send_verification_code(user)
+    except Exception:
+        app.logger.exception("ارسال مجدد ایمیل تایید ناموفق بود")
+        return render_template(
+            "login.html", mode="verify", email=user.email,
+            error="ارسال ایمیل ناموفق بود. تنظیمات SMTP سرور را بررسی کنید.",
+        )
+    return render_template(
+        "login.html", mode="verify", email=user.email,
+        success="کد تایید جدید به ایمیل شما ارسال شد.",
+    )
 
 
 @app.route("/logout")
