@@ -11,7 +11,7 @@
      و لینک‌های target=_blank را در مرورگر پیش‌فرض سیستم باز می‌کند.
 
 تنظیمات اختیاری (متغیر محیطی یا فایل .env کنار EXE):
-  LISTIA_APP_URL    آدرس وب‌اپ روی چابکان (پیش‌فرض: https://listia.chbk.app)
+  LISTIA_APP_URL    آدرس وب‌اپ روی چابکان (پیش‌فرض: https://listia.ir)
   LISTIA_TITLE      عنوان پنجره (پیش‌فرض: لیستیا)
 
 برای ساخت EXE به فایل build_windows/build.ps1 (یا وورک‌فلو GitHub Actions)
@@ -21,7 +21,7 @@
 import os
 import sys
 
-DEFAULT_APP_URL = "https://mylist.chbkn.dev"
+DEFAULT_APP_URL = "https://listia.ir"
 DEFAULT_TITLE = "لیستیا"
 
 # فایل desktop_siteconfig.py فقط هنگام ساخت (build.ps1 / GitHub Actions) تولید
