@@ -21,7 +21,7 @@
 import os
 import sys
 
-DEFAULT_APP_URL = "https://listia.chbk.app"
+DEFAULT_APP_URL = "https://mylist.chbkn.dev"
 DEFAULT_TITLE = "لیستیا"
 
 # فایل desktop_siteconfig.py فقط هنگام ساخت (build.ps1 / GitHub Actions) تولید
