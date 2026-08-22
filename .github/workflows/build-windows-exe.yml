@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       app_url:
-        description: "آدرس وباپ چابکان (برای پخت داخل EXE) — خالی بگذارید تا پیشفرض استفاده شود"
+        description: "آدرس وب‌اپ چابکان (برای پخت داخل EXE) — خالی بگذارید تا پیش‌فرض استفاده شود"
         required: false
         default: ""
   push:
