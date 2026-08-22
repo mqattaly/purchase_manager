@@ -112,6 +112,9 @@
       {% if error %}
         <div class="login-error">{{ error }}</div>
       {% endif %}
+      {% if success %}
+        <div class="login-hint">{{ success }}</div>
+      {% endif %}
 
       {% if mode == 'signup' %}
         <div class="login-hint">حساب جدید آزمایشی: شامل ۱ تأمین‌کننده و ۵ محصول برای شروع سریع. صدور لایسنس و پشتیبانی با همین مشخصات انجام می‌شود.</div>
@@ -121,12 +124,27 @@
             <input class="login-field" name="last_name" placeholder="نام خانوادگی" autocomplete="family-name" maxlength="100" value="{{ request.form.get('last_name', '') }}" required>
           </div>
           <input class="login-field" name="phone" type="tel" inputmode="tel" dir="ltr" style="text-align:left;" placeholder="شماره موبایل — 09123456789" autocomplete="tel" maxlength="20" value="{{ request.form.get('phone', '') }}" required>
+          <input class="login-field" name="email" type="email" inputmode="email" dir="ltr" style="text-align:left;" placeholder="ایمیل — برای دریافت کد تایید" autocomplete="email" maxlength="255" value="{{ request.form.get('email', '') }}" required>
           <input class="login-field" name="username" placeholder="نام کاربری (برای ورود)" autocomplete="username" maxlength="100" value="{{ request.form.get('username', '') }}" required>
           <input class="login-field" name="password" type="password" placeholder="رمز عبور (حداقل ۶ کاراکتر)" autocomplete="new-password" minlength="6" required>
           <button type="submit" class="login-btn signup">ساخت حساب کاربری</button>
         </form>
         <div class="login-switch">
           قبلاً حساب ساختی؟ <a href="/login">ورود به لیستیا</a>
+        </div>
+      {% elif mode == 'verify' %}
+        <div class="login-hint">کد ۶ رقمی ارسال‌شده به ایمیل را وارد کنید. اگر ایمیل را نمی‌بینید، پوشه Spam/Junk را هم بررسی کنید.</div>
+        <form method="POST" action="/verify-email">
+          <input class="login-field" name="email" type="email" inputmode="email" dir="ltr" style="text-align:left;" placeholder="ایمیل ثبت‌نام" autocomplete="email" maxlength="255" value="{{ email or request.form.get('email', '') }}" required autofocus>
+          <input class="login-field" name="code" inputmode="numeric" dir="ltr" style="text-align:center; letter-spacing:4px; font-weight:700;" placeholder="کد تایید ۶ رقمی" autocomplete="one-time-code" maxlength="6" pattern="[0-9۰-۹٠-٩]{6}" required>
+          <button type="submit" class="login-btn signup">تایید ایمیل و ورود</button>
+        </form>
+        <form method="POST" action="/resend-verification" style="margin-top:10px;">
+          <input type="hidden" name="email" value="{{ email or request.form.get('email', '') }}">
+          <button type="submit" class="login-btn" style="background:#2F6F76;">ارسال مجدد کد</button>
+        </form>
+        <div class="login-switch">
+          ایمیل اشتباه وارد کردی؟ <a href="/signup">ثبت‌نام دوباره</a> · <a href="/login">ورود</a>
         </div>
       {% else %}
         <form method="POST" action="/login">
