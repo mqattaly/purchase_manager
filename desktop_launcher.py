@@ -118,14 +118,18 @@ def _check_reachable(url, timeout=8):
 
 
 # شناسه‌های نصب Edge WebView2 (همان‌هایی که pywebview برای تشخیص استفاده می‌کند)
-_WEBVIEW2_CLIENTS = [
-    ("{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}", "Microsoft Edge WebView2 Runtime"),
-    ("{2CD8A007-E189-409D-A2C8-9AF4EF3C72AA}", "Microsoft Edge WebView2 Beta"),
-    ("{0D50BFEC-CD6A-4F9A-964C-C7416E3ACB10}", "Microsoft Edge WebView2 Developer"),
-    ("{65C35B14-6C1D-4122-AC46-7148CC9D6497}", "Microsoft Edge WebView2 Canary"),
+_WEBVIEW2_CLIENT_IDS = [
+    "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",  # Microsoft Edge WebView2 Runtime
+    "{2CD8A007-E189-409D-A2C8-9AF4EF3C72AA}",  # WebView2 Beta
+    "{0D50BFEC-CD6A-4F9A-964C-C7416E3ACB10}",  # WebView2 Developer
+    "{65C35B14-6C1D-4122-AC46-7148CC9D6497}",  # WebView2 Canary
 ]
 
 WEBVIEW2_DOWNLOAD_URL = "https://developer.microsoft.com/microsoft-edge/webview2/"
+# نصب‌کنندهٔ رسمی Evergreen Bootstrapper مایکروسافت (کوچک؛ آخرین نسخه را نصب می‌کند)
+WEBVIEW2_BOOTSTRAPPER_URL = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"
+
+_MIN_WEBVIEW2_VERSION = (86, 0, 622, 0)
 
 
 def _version_tuple(version_str):
@@ -138,95 +142,117 @@ def _version_tuple(version_str):
     return tuple(parts[:4])
 
 
-def _webview2_installed():
-    """آیا Edge WebView2 Runtime (نسخهٔ Evergreen) روی این ویندوز نصب است؟"""
+def _read_reg_pv(root, path):
+    """مقدار pv (نسخه) را از یک کلید رجیستری بخواند؛ اگر نبود None برمی‌گرداند."""
     try:
         import winreg
-    except Exception:
-        return False
 
-    min_version = (86, 0, 622, 0)
-    roots = (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE)
-    for client_id, _desc in _WEBVIEW2_CLIENTS:
+        with winreg.OpenKey(root, path) as key:
+            version, _ = winreg.QueryValueEx(key, "pv")
+            return version
+    except Exception:
+        return None
+
+
+def _webview2_registry_paths():
+    """همهٔ مسیرهای رجیستری که WebView2 می‌تواند در آن‌ها ثبت شده باشد.
+
+    نکتهٔ مهم: در ویندوز ۶۴ بیتی، نصبِ «per-machine» زیر WOW6432Node (نمای ۳۲ بیتی)
+    نوشته می‌شود؛ اگر فقط نمای ۶۴ بیتی را بخوانیم اشتباهاً «نصب نیست» گزارش می‌شود.
+    به همین دلیل هر دو نما + HKEY_CURRENT_USER را بررسی می‌کنیم.
+    """
+    try:
+        import winreg
+
+        roots = (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER)
+    except Exception:
+        return []
+
+    paths = []
+    for client_id in _WEBVIEW2_CLIENT_IDS:
         for root in roots:
-            try:
-                with winreg.OpenKey(
-                    root, rf"Software\Microsoft\EdgeUpdate\Clients\{client_id}"
-                ) as key:
-                    version, _ = winreg.QueryValueEx(key, "pv")
-                    if _version_tuple(version) >= min_version:
-                        return True
-            except OSError:
+            for sub in (r"SOFTWARE\Microsoft\EdgeUpdate\Clients", r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients"):
+                paths.append((root, rf"{sub}\{client_id}"))
+    return paths
+
+
+def _webview2_files_present():
+    """روش دوم: اگر فایل msedgewebview2.exe در پوشه‌های استاندارد وجود داشته باشد."""
+    candidates = []
+    for env_name, tail in (
+        ("LOCALAPPDATA", r"Microsoft\EdgeWebView\Application"),
+        ("ProgramFiles(x86)", r"Microsoft\EdgeWebView\Application"),
+        ("ProgramFiles", r"Microsoft\EdgeWebView\Application"),
+    ):
+        base = os.environ.get(env_name)
+        if base:
+            candidates.append(os.path.join(base, tail))
+    for base in candidates:
+        try:
+            if not os.path.isdir(base):
                 continue
+            for sub in os.listdir(base):
+                if os.path.isfile(os.path.join(base, sub, "msedgewebview2.exe")):
+                    return True
+        except OSError:
+            continue
     return False
 
 
-def main():
-    _load_env_file()
+def _webview2_installed():
+    """آیا Edge WebView2 Runtime (نسخهٔ مناسب) روی این ویندوز در دسترس است؟"""
+    for root, path in _webview2_registry_paths():
+        version = _read_reg_pv(root, path)
+        if version and _version_tuple(version) >= _MIN_WEBVIEW2_VERSION:
+            return True
+    return _webview2_files_present()
 
-    if sys.platform != "win32":
-        _message_box(
-            "این برنامه مخصوص ویندوز است و روی سیستم‌عامل فعلی اجرا نمی‌شود.",
-            _window_title(),
-            error=True,
-        )
-        return 1
 
-    import webview
+def _bundled_webview2_installer():
+    """مسیر نصب‌کنندهٔ WebView2 اگر داخل باندل EXE (یا کنار آن) گذاشته شده باشد."""
+    candidates = []
+    if getattr(sys, "frozen", False):
+        base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+        candidates.append(os.path.join(base, "desktop_assets", "MicrosoftEdgeWebview2Setup.exe"))
+        candidates.append(os.path.join(os.path.dirname(sys.executable), "MicrosoftEdgeWebview2Setup.exe"))
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+        candidates.append(os.path.join(base, "build_windows", "MicrosoftEdgeWebview2Setup.exe"))
+    for path in candidates:
+        if path and os.path.exists(path):
+            return path
+    return None
 
-    app_url = _app_url()
-    title = _window_title()
-    user_data_dir = _user_data_dir()
-    os.makedirs(user_data_dir, exist_ok=True)
 
-    # اجازهٔ دانلود (فایل نمونهٔ اکسل) با دیالوگ «ذخیره در…» بومی ویندوز.
-    webview.settings["ALLOW_DOWNLOADS"] = True
+def _install_webview2():
+    """نصب خودکار WebView2 Runtime (ترجیحاً از فایل باندل‌شده، وگرنه دانلود رسمی)."""
+    import shutil
+    import subprocess
+    import tempfile
 
-    # روی ویندوزهای قدیمی ممکن است موتور WebView2 نصب نباشد؛ در این صورت
-    # به‌جای نمایش صفحهٔ خالی، راهنمای نصب را نشان می‌دهیم.
-    if not _webview2_installed():
-        _message_box(
-            "برای اجرای لیستیا به «Microsoft Edge WebView2 Runtime» نیاز است.\n\n"
-            "این مؤلفهٔ کوچک معمولاً همراه ویندوز ۱۰/۱۱ نصب است، اما روی این سیستم پیدا نشد.\n"
-            "بعد از نصب یک‌بارهٔ آن، برنامه بدون مشکل اجرا می‌شود.",
-            title,
-            error=True,
-        )
+    installer = _bundled_webview2_installer()
+    local = installer is not None
+
+    if not local:
         try:
-            import webbrowser
+            import urllib.request
 
-            webbrowser.open(WEBVIEW2_DOWNLOAD_URL)
+            tmp_dir = tempfile.mkdtemp(prefix="listia_wv2_")
+            installer = os.path.join(tmp_dir, "MicrosoftEdgeWebview2Setup.exe")
+            req = urllib.request.Request(
+                WEBVIEW2_BOOTSTRAPPER_URL, headers={"User-Agent": "Mozilla/5.0"}
+            )
+            with urllib.request.urlopen(req, timeout=120) as resp, open(installer, "wb") as fh:
+                shutil.copyfileobj(resp, fh)
         except Exception:
-            pass
-        return 1
+            return False
 
-    if not _check_reachable(app_url):
-        _message_box(
-            "به سرور لیستیا دسترسی پیدا نشد.\n\n"
-            "لطفاً اتصال اینترنت را بررسی و دوباره تلاش کنید.\n"
-            f"آدرس برنامه: {app_url}",
-            title,
-            error=True,
-        )
+    try:
+        subprocess.run([installer, "/silent", "/install"], timeout=900, check=False)
+    except Exception:
+        return False
+    finally:
+        if not local and installer:
+            shutil.rmtree(os.path.dirname(installer), ignore_errors=True)
 
-    window = webview.create_window(
-        title=title,
-        url=app_url,
-        width=1280,
-        height=820,
-        min_size=(980, 640),
-        background_color="#142430",
-    )
-
-    webview.start(
-        private_mode=False,          # حفظ نشست/ورود بین دفعات اجرا
-        storage_path=user_data_dir,  # پوشهٔ پروفایل WebView2
-        icon=_icon_path(),
-        gui="edgechromium",
-        debug=False,
-    )
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    return 
