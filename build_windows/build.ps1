@@ -59,6 +59,21 @@ if ($AppUrl) {
     Remove-Item $SiteConfig -Force
 }
 
+# 2b) نصب‌کنندهٔ رسمی WebView2 (Evergreen Bootstrapper) — برای اینکه حتی روی
+#     ویندوزهایی که WebView2 ندارند، برنامه خودش آن را بدون نیاز به اینترنتِ
+#     لحظهٔ اجرا نصب کند. در صورت موفق نبودن دانلود، EXE باز هم ساخته می‌شود
+#     (لانچر هنگام اجرا در صورت نیاز آن را دانلود می‌کند).
+$Bootstrapper = Join-Path $PSScriptRoot "MicrosoftEdgeWebview2Setup.exe"
+if (-not (Test-Path $Bootstrapper)) {
+    Write-Host "==> دانلود نصب‌کنندهٔ رسمی WebView2 برای باندل داخل EXE"
+    try {
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri "https://go.microsoft.com/fwlink/p/?LinkId=2124703" -OutFile $Bootstrapper -UseBasicParsing
+    } catch {
+        Write-Host "    دانلود نصب‌کننده ممکن نشد؛ ادامهٔ ساخت بدون آن (در صورت نیاز هنگام اجرا دانلود می‌شود)."
+    }
+}
+
 # 3) ساخت EXE یک‌فایلی
 Write-Host "==> ساخت EXE با PyInstaller (یک فایل، بدون پنجره کنسول)"
 $pyinstallerArgs = @(
@@ -68,9 +83,12 @@ $pyinstallerArgs = @(
     "--version-file", $VerFile,
     "--add-data", "$Icon;desktop_assets",
     "--hidden-import", "clr",
-    "--hidden-import", "clr_loader",
-    "desktop_launcher.py"
+    "--hidden-import", "clr_loader"
 )
+if (Test-Path $Bootstrapper) {
+    $pyinstallerArgs += @("--add-data", "$Bootstrapper;desktop_assets")
+}
+$pyinstallerArgs += @("desktop_launcher.py")
 & $VenvPy -m PyInstaller @pyinstallerArgs
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller با خطا متوقف شد." }
 
