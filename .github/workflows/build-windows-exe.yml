@@ -1,0 +1,73 @@
+name: Build Windows EXE
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_url:
+        description: "آدرس وب‌اپ چابکان (برای پخت داخل EXE) — خالی بگذارید تا پیش‌فرض استفاده شود"
+        required: false
+        default: ""
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r build_windows/requirements.txt
+
+      - name: Bake app URL (if provided)
+        shell: pwsh
+        env:
+          APP_URL: ${{ github.event.inputs.app_url }}
+        run: |
+          $url = "$env:APP_URL".Trim().TrimEnd('/')
+          if ($url) {
+            "APP_URL = '$url'" | Out-File -FilePath desktop_siteconfig.py -Encoding utf8
+            Write-Host "Baked app URL: $url"
+          } elseif (Test-Path desktop_siteconfig.py) {
+            Remove-Item desktop_siteconfig.py -Force
+          }
+
+      - name: Build EXE with PyInstaller
+        shell: pwsh
+        run: |
+          python -m PyInstaller `
+            --noconfirm --clean --onefile --windowed `
+            --name Listia `
+            --icon build_windows\icon\Listia.ico `
+            --version-file build_windows\version_info.txt `
+            --add-data "build_windows\icon\Listia.ico;desktop_assets" `
+            --hidden-import clr `
+            --hidden-import clr_loader `
+            desktop_launcher.py
+
+      - name: Upload EXE artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Listia-Windows-EXE
+          path: dist/Listia.exe
+          if-no-files-found: error
+
+      - name: Publish GitHub Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/Listia.exe
+          generate_release_notes: true
