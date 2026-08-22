@@ -1,6 +1,13 @@
 .venv/
+.venv-build/
 __pycache__/
 *.pyc
 .env
 instance/*.db
 instance/*.db-*
+
+# خروجی‌های ساخت EXE ویندوز
+build/
+dist/
+*.spec
+desktop_siteconfig.py
